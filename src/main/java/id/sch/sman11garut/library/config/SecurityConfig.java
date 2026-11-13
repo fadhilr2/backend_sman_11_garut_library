@@ -64,6 +64,10 @@ public class SecurityConfig {
                 .requestMatchers("/api/health", "/actuator/health", "/actuator/info").permitAll()
                 .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
 
+                // Authenticated user operations (Teacher + Librarian)
+                .requestMatchers("/api/auth/me", "/api/auth/change-password").authenticated()
+                .requestMatchers("/api/books/mine", "/api/archive/mine").authenticated()
+
                 // Public catalog browsing (anonymous students)
                 .requestMatchers(HttpMethod.GET, "/api/books/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/archive/**").permitAll()
@@ -72,9 +76,6 @@ public class SecurityConfig {
 
                 // Admin endpoints strictly restricted to LIBRARIAN
                 .requestMatchers("/api/admin/**").hasRole("LIBRARIAN")
-
-                // Authenticated user operations (Teacher + Librarian)
-                .requestMatchers("/api/auth/me", "/api/auth/change-password").authenticated()
 
                 // All other requests require authentication
                 .anyRequest().authenticated()
