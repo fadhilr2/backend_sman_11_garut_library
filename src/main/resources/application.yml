@@ -1,0 +1,34 @@
+spring:
+  application:
+    name: library
+  profiles:
+    default: dev
+
+  # File uploads up to 2GB for videos and large PDFs
+  servlet:
+    multipart:
+      max-file-size: 2GB
+      max-request-size: 2GB
+
+  # JPA & Flyway (Flyway owns schema, Hibernate only validates)
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+
+# Common Application Defaults
+app:
+  jwt:
+    expiry-hours: 8
+  storage:
+    min-free-space: 5GB
+
+# Actuator Base Settings
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
