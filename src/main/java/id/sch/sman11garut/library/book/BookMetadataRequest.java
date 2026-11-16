@@ -1,6 +1,5 @@
 package id.sch.sman11garut.library.book;
 
-import id.sch.sman11garut.library.common.Visibility;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 

@@ -249,264 +249,68 @@ Ensure `/api/books/mine` and `/api/archive/mine` are explicitly authenticated be
 mvn test-compile -f library/pom.xml
 ```
 
-### Manual Testing Guide (Postman Format)
+### Manual Testing Guide (Executable PowerShell & Curl Commands)
 
-#### Environment Variables
-Configure the following variables in your Postman Environment:
-| Variable | Initial Value | Notes |
-|---|---|---|
-| `baseUrl` | `http://localhost:8081` | Dev backend server port |
-| `adminToken` | *(empty)* | Populated by Request 3 Tests script |
-| `bookId` | `1` | Populated by Request 5 Tests script |
+Start the application:
+```powershell
+cd c:\Users\lenovo\Documents\GitHub\TPLM\backend_sman_11_garut_library\library
+mvn spring-boot:run
+```
 
----
+#### 1. Public Categories & Metadata
+```powershell
+# List book categories (public)
+Invoke-RestMethod -Uri http://localhost:8081/api/categories?type=BOOK
 
-#### Request 1: List Categories (Public)
-* **Method**: `GET`
-* **URL**: `{{baseUrl}}/api/categories?type=BOOK`
-* **Headers**: *(None)*
-* **Expected Response** (`200 OK`):
-  ```json
-  [
-    {
-      "id": 1,
-      "name": "Matematika",
-      "type": "BOOK",
-      "parentId": null,
-      "children": []
-    }
-  ]
-  ```
+# Filter metadata options
+Invoke-RestMethod -Uri http://localhost:8081/api/meta/filters
+```
 
----
+#### 2. Category Management (Librarian)
+```powershell
+$adminLogin = @{ username = "admin"; password = "admin123" } | ConvertTo-Json
+$token = (Invoke-RestMethod -Uri http://localhost:8081/api/auth/login -Method Post -ContentType "application/json" -Body $adminLogin).token
+$adminHeaders = @{ Authorization = "Bearer $token" }
 
-#### Request 2: Get Meta Filter Options (Public)
-* **Method**: `GET`
-* **URL**: `{{baseUrl}}/api/meta/filters`
-* **Headers**: *(None)*
-* **Expected Response** (`200 OK`):
-  ```json
-  {
-    "gradeLevels": ["X", "XI", "XII", "ALL"],
-    "bookTypes": ["EBOOK", "TEACHING_MODULE", "QUESTION_BANK", "SLIDES", "OTHER"],
-    "mediaTypes": ["IMAGE", "VIDEO", "DOCUMENT"],
-    "curricula": ["K13", "Kurikulum Merdeka", "Umum"]
-  }
-  ```
+$catBody = @{
+    name = "Koleksi Khusus"
+    type = "BOOK"
+} | ConvertTo-Json
 
----
+Invoke-RestMethod -Uri http://localhost:8081/api/admin/categories -Method Post -ContentType "application/json" -Headers $adminHeaders -Body $catBody
+```
 
-#### Request 3: Admin Login (Obtain Token)
-* **Method**: `POST`
-* **URL**: `{{baseUrl}}/api/auth/login`
-* **Headers**:
-  * `Content-Type: application/json`
-* **Body** (`raw` - JSON):
-  ```json
-  {
-    "username": "admin",
-    "password": "admin123"
-  }
-  ```
-* **Postman Tests Script**:
-  ```javascript
-  pm.test("Status code is 200", function () {
-      pm.response.to.have.status(200);
-      var jsonData = pm.response.json();
-      pm.environment.set("adminToken", jsonData.token);
-  });
-  ```
+#### 3. Book Upload (Teacher / Librarian)
+Upload a book with `multipart/form-data`:
+```powershell
+curl -X POST http://localhost:8081/api/books `
+  -H "Authorization: Bearer $token" `
+  -F "file=@sample.pdf;type=application/pdf" `
+  -F "metadata={\"title\":\"Buku Matematika SMA\",\"author\":\"Drs. Suryono\",\"bookType\":\"EBOOK\",\"gradeLevel\":\"X\",\"visibility\":\"PUBLIC\"};type=application/json"
+```
 
----
+#### 4. Duplicate Rejection Check
+Re-run the exact same upload command with `sample.pdf`.
+* **Expected result:** HTTP `409 Conflict` with code `"DUPLICATE_FILE"`.
 
-#### Request 4: Create Book Category (Librarian Only)
-* **Method**: `POST`
-* **URL**: `{{baseUrl}}/api/admin/categories`
-* **Headers**:
-  * `Content-Type: application/json`
-  * `Authorization: Bearer {{adminToken}}`
-* **Body** (`raw` - JSON):
-  ```json
-  {
-    "name": "Koleksi Khusus",
-    "type": "BOOK"
-  }
-  ```
-* **Expected Response** (`201 Created`):
-  ```json
-  {
-    "id": 13,
-    "name": "Koleksi Khusus",
-    "type": "BOOK",
-    "parentId": null,
-    "children": []
-  }
-  ```
+#### 5. Anonymous Browsing & HTTP Range Streaming
+```powershell
+# Anonymous search by keyword (FULLTEXT)
+Invoke-RestMethod -Uri "http://localhost:8081/api/books?q=matematika"
 
----
+# Test HTTP Range streaming (first 512 bytes)
+curl -i -H "Range: bytes=0-511" http://localhost:8081/api/books/1/file
+```
+* **Expected result:** HTTP `206 Partial Content` with `Content-Range: bytes 0-511/{total}`.
 
-#### Request 5: Upload Book (Multipart Form-Data)
-* **Method**: `POST`
-* **URL**: `{{baseUrl}}/api/books`
-* **Headers**:
-  * `Authorization: Bearer {{adminToken}}`
-  *(Note: Do not manually set `Content-Type: multipart/form-data`; let Postman auto-generate the boundary).*
-* **Body** (`form-data`):
-  | Key | Type | Value / File | Content-Type |
-  |---|---|---|---|
-  | `file` | `File` | *(Select a sample `.pdf` file)* | `application/pdf` |
-  | `cover` | `File` | *(Optional, select `.jpg` image)* | `image/jpeg` |
-  | `metadata` | `Text` | `{"title":"Buku Matematika SMA","author":"Drs. Suryono","publisher":"Erlangga","publicationYear":2024,"bookType":"EBOOK","gradeLevel":"X","curriculum":"Kurikulum Merdeka","visibility":"PUBLIC"}` | `application/json` |
-* **Postman Tests Script**:
-  ```javascript
-  pm.test("Status code is 201", function () {
-      pm.response.to.have.status(201);
-      var jsonData = pm.response.json();
-      pm.environment.set("bookId", jsonData.id);
-  });
-  ```
-* **Expected Response** (`201 Created`):
-  ```json
-  {
-    "id": 1,
-    "title": "Buku Matematika SMA",
-    "author": "Drs. Suryono",
-    "publisher": "Erlangga",
-    "publicationYear": 2024,
-    "bookType": "EBOOK",
-    "gradeLevel": "X",
-    "curriculum": "Kurikulum Merdeka",
-    "visibility": "PUBLIC",
-    "originalName": "sample.pdf",
-    "mimeType": "application/pdf",
-    "fileSize": 1048576,
-    "hasCover": true,
-    "downloadCount": 0
-  }
-  ```
+#### 6. Soft Delete & Restore
+```powershell
+# Delete book
+curl -X DELETE -H "Authorization: Bearer $token" http://localhost:8081/api/books/1
 
----
+# Verify it disappears from catalog
+Invoke-RestMethod -Uri "http://localhost:8081/api/books/1" # Expect 404
 
-#### Request 6: Test Duplicate Rejection Check
-* **Method**: `POST`
-* **URL**: `{{baseUrl}}/api/books`
-* **Headers & Body**: Identical to Request 5 (uploading the exact same PDF file).
-* **Expected Response** (`409 Conflict`):
-  ```json
-  {
-    "status": 409,
-    "code": "DUPLICATE_FILE",
-    "message": "A book with the same file content already exists"
-  }
-  ```
-
----
-
-#### Request 7: Search Books (Full-Text Search & Filters)
-* **Method**: `GET`
-* **URL**: `{{baseUrl}}/api/books?q=matematika&grade=X&sort=newest`
-* **Headers**: *(None - Public)*
-* **Expected Response** (`200 OK`):
-  ```json
-  {
-    "content": [
-      {
-        "id": 1,
-        "title": "Buku Matematika SMA",
-        "author": "Drs. Suryono",
-        "bookType": "EBOOK",
-        "gradeLevel": "X",
-        "visibility": "PUBLIC",
-        "hasCover": true,
-        "downloadCount": 0
-      }
-    ],
-    "page": 0,
-    "size": 20,
-    "totalElements": 1,
-    "totalPages": 1,
-    "last": true
-  }
-  ```
-
----
-
-#### Request 8: Get Book Detail
-* **Method**: `GET`
-* **URL**: `{{baseUrl}}/api/books/{{bookId}}`
-* **Headers**: *(None for PUBLIC books; `Authorization: Bearer {{adminToken}}` required for STAFF books)*
-* **Expected Response** (`200 OK`):
-  ```json
-  {
-    "id": 1,
-    "title": "Buku Matematika SMA",
-    "author": "Drs. Suryono",
-    "publisher": "Erlangga",
-    "publicationYear": 2024,
-    "bookType": "EBOOK",
-    "gradeLevel": "X",
-    "curriculum": "Kurikulum Merdeka",
-    "visibility": "PUBLIC",
-    "originalName": "sample.pdf",
-    "mimeType": "application/pdf"
-  }
-  ```
-
----
-
-#### Request 9: HTTP Range File Streaming (Inline Preview)
-* **Method**: `GET`
-* **URL**: `{{baseUrl}}/api/books/{{bookId}}/file`
-* **Headers**:
-  * `Range: bytes=0-511`
-* **Expected Response** (`206 Partial Content`):
-  * Headers: `Content-Range: bytes 0-511/<total_size>`, `Accept-Ranges: bytes`
-  * Body: First 512 bytes of binary content.
-
----
-
-#### Request 10: Download Book File
-* **Method**: `GET`
-* **URL**: `{{baseUrl}}/api/books/{{bookId}}/download`
-* **Headers**: *(None)*
-* **Expected Response** (`200 OK`):
-  * Headers: `Content-Disposition: attachment; filename="sample.pdf"`
-  * Note: Increments `downloadCount` by 1.
-
----
-
-#### Request 11: Get Book Cover
-* **Method**: `GET`
-* **URL**: `{{baseUrl}}/api/books/{{bookId}}/cover`
-* **Headers**: *(None)*
-* **Expected Response** (`200 OK`):
-  * Returns uploaded JPEG image or fallback SVG placeholder (`Content-Type: image/svg+xml`).
-
----
-
-#### Request 12: List My Uploaded Books (Staff Only)
-* **Method**: `GET`
-* **URL**: `{{baseUrl}}/api/books/mine`
-* **Headers**:
-  * `Authorization: Bearer {{adminToken}}`
-* **Expected Response** (`200 OK`): Paginated list of books uploaded by current user.
-
----
-
-#### Request 13: Soft Delete Book
-* **Method**: `DELETE`
-* **URL**: `{{baseUrl}}/api/books/{{bookId}}`
-* **Headers**:
-  * `Authorization: Bearer {{adminToken}}`
-* **Expected Response** (`204 No Content`):
-  * Calling Request 8 (`GET {{baseUrl}}/api/books/{{bookId}}`) will now return `404 Not Found`.
-
----
-
-#### Request 14: Restore Soft-Deleted Book (Librarian Only)
-* **Method**: `POST`
-* **URL**: `{{baseUrl}}/api/admin/books/{{bookId}}/restore`
-* **Headers**:
-  * `Authorization: Bearer {{adminToken}}`
-* **Expected Response** (`200 OK`):
-  * Book is un-deleted; Request 8 will now succeed again with `200 OK`.
+# Restore book as Librarian
+curl -X POST -H "Authorization: Bearer $token" http://localhost:8081/api/admin/books/1/restore
+```

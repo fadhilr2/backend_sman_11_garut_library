@@ -1,7 +1,6 @@
 package id.sch.sman11garut.library.book;
 
 import id.sch.sman11garut.library.category.BookCategory;
-import id.sch.sman11garut.library.common.Visibility;
 import id.sch.sman11garut.library.user.User;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

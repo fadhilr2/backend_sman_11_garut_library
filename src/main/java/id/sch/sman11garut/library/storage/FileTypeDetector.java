@@ -10,8 +10,6 @@ import java.util.Map;
 import java.util.Set;
 import org.apache.tika.Tika;
 import org.apache.tika.io.TikaInputStream;
-import org.apache.tika.metadata.Metadata;
-import org.apache.tika.metadata.TikaCoreProperties;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -36,7 +34,6 @@ public class FileTypeDetector {
             "image/gif",
             "video/mp4",
             "video/webm",
-            "video/x-matroska",
             "application/pdf",
             "application/epub+zip",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -54,8 +51,7 @@ public class FileTypeDetector {
             Map.entry("image/webp", Set.of("webp")),
             Map.entry("image/gif", Set.of("gif")),
             Map.entry("video/mp4", Set.of("mp4")),
-            Map.entry("video/webm", Set.of("webm")),
-            Map.entry("video/x-matroska", Set.of("mkv")));
+            Map.entry("video/webm", Set.of("webm")));
 
     private static final Map<String, String> CANONICAL_EXTENSION = Map.ofEntries(
             Map.entry("application/pdf", "pdf"),
@@ -68,8 +64,7 @@ public class FileTypeDetector {
             Map.entry("image/webp", "webp"),
             Map.entry("image/gif", "gif"),
             Map.entry("video/mp4", "mp4"),
-            Map.entry("video/webm", "webm"),
-            Map.entry("video/x-matroska", "mkv"));
+            Map.entry("video/webm", "webm"));
 
     private final Tika tika = new Tika();
 
@@ -79,7 +74,7 @@ public class FileTypeDetector {
             throw AppException.badRequest("INVALID_FILE_TYPE", "This file type is not allowed");
         }
 
-        String sniffed = sniff(file, originalFilename, extension);
+        String sniffed = sniff(file, extension);
         if (!allowedMimes(category).contains(sniffed)) {
             throw AppException.badRequest("INVALID_FILE_TYPE", "File type is not allowed");
         }
@@ -90,14 +85,10 @@ public class FileTypeDetector {
         return new DetectedFile(sniffed, CANONICAL_EXTENSION.get(sniffed));
     }
 
-    private String sniff(Path file, String originalFilename, String extension) throws IOException {
-        Metadata metadata = new Metadata();
-        if (originalFilename != null && !originalFilename.isBlank()) {
-            metadata.set(TikaCoreProperties.RESOURCE_NAME_KEY, originalFilename);
-        }
+    private String sniff(Path file, String extension) throws IOException {
         String detected;
         try (InputStream input = TikaInputStream.get(file)) {
-            detected = tika.detect(input, metadata);
+            detected = tika.detect(input);
         }
         detected = baseType(detected);
         if ("image/jpg".equals(detected)) {
@@ -106,14 +97,6 @@ public class FileTypeDetector {
         // Tika often reports a bare zip for EPUB containers when the mimetype entry is not read.
         if ("application/zip".equals(detected) && "epub".equals(extension)) {
             return "application/epub+zip";
-        }
-        // WebM is an EBML container; raw stream detection without DocType evaluation may report Matroska.
-        if (("application/x-matroska".equals(detected) || "video/x-matroska".equals(detected)) && "webm".equals(extension)) {
-            return "video/webm";
-        }
-        // Normalize MKV if detected under legacy application/x-matroska
-        if ("application/x-matroska".equals(detected) && "mkv".equals(extension)) {
-            return "video/x-matroska";
         }
         return detected;
     }

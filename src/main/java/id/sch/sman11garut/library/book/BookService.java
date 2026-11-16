@@ -5,7 +5,6 @@ import id.sch.sman11garut.library.category.BookCategory;
 import id.sch.sman11garut.library.category.CategoryService;
 import id.sch.sman11garut.library.common.AppException;
 import id.sch.sman11garut.library.common.PageResponse;
-import id.sch.sman11garut.library.common.Visibility;
 import id.sch.sman11garut.library.storage.FileStorageService;
 import id.sch.sman11garut.library.storage.RangeFileResponder;
 import id.sch.sman11garut.library.storage.StorageCategory;
