@@ -87,89 +87,181 @@ Add missing JJWT runtime implementations required by `jjwt-api 0.13.0`:
 
 ---
 
-## 3. Manual Testing Guide (Executable PowerShell Commands)
+## 3. Manual Testing Guide (Postman Format)
 
-Start the application:
-```powershell
-cd c:\Users\lenovo\Documents\GitHub\TPLM\backend_sman_11_garut_library\library
-mvn spring-boot:run
-```
+### Environment Variables
+Configure the following variables in your Postman Environment:
+| Variable | Initial Value | Notes |
+|---|---|---|
+| `baseUrl` | `http://localhost:8081` | Dev backend server port |
+| `adminToken` | *(empty)* | Populated by Request 1 Tests script |
+| `teacherToken` | *(empty)* | Populated by Request 4 Tests script |
 
-Verify in console:
-```text
-No LIBRARIAN account found in database. Seeding initial admin: admin
-Initial LIBRARIAN account created successfully with username 'admin'.
-```
+---
 
-#### 1. Admin Login (`POST /api/auth/login`)
-```powershell
-$loginBody = @{
-    username = "admin"
-    password = "admin123"
-} | ConvertTo-Json
+### Request 1: Admin Login
+* **Method**: `POST`
+* **URL**: `{{baseUrl}}/api/auth/login`
+* **Headers**:
+  * `Content-Type: application/json`
+* **Body** (`raw` - JSON):
+  ```json
+  {
+    "username": "admin",
+    "password": "admin123"
+  }
+  ```
+* **Postman Tests Script**:
+  ```javascript
+  pm.test("Status code is 200", function () {
+      pm.response.to.have.status(200);
+      var jsonData = pm.response.json();
+      pm.environment.set("adminToken", jsonData.token);
+  });
+  ```
+* **Expected Response** (`200 OK`):
+  ```json
+  {
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "user": {
+      "id": 1,
+      "username": "admin",
+      "fullName": "Administrator Perpustakaan",
+      "role": "LIBRARIAN",
+      "active": true
+    }
+  }
+  ```
 
-$loginResponse = Invoke-RestMethod -Uri http://localhost:8081/api/auth/login -Method Post -ContentType "application/json" -Body $loginBody
-$loginResponse
-$adminToken = $loginResponse.token
-```
+---
 
-#### 2. Verify Profile (`GET /api/auth/me`)
-```powershell
-$adminHeaders = @{ Authorization = "Bearer $adminToken" }
-Invoke-RestMethod -Uri http://localhost:8081/api/auth/me -Headers $adminHeaders
-```
+### Request 2: Get Current User Profile
+* **Method**: `GET`
+* **URL**: `{{baseUrl}}/api/auth/me`
+* **Headers**:
+  * `Authorization: Bearer {{adminToken}}`
+* **Expected Response** (`200 OK`):
+  ```json
+  {
+    "id": 1,
+    "username": "admin",
+    "fullName": "Administrator Perpustakaan",
+    "role": "LIBRARIAN",
+    "active": true
+  }
+  ```
 
-#### 3. Create a Teacher Account (`POST /api/admin/users`)
-```powershell
-$teacherBody = @{
-    username = "guru_matematika"
-    password = "password123"
-    fullName = "Budi Santoso, S.Pd."
-    role = "TEACHER"
-} | ConvertTo-Json
+---
 
-$createdTeacher = Invoke-RestMethod -Uri http://localhost:8081/api/admin/users -Method Post -ContentType "application/json" -Headers $adminHeaders -Body $teacherBody
-$createdTeacher
-```
+### Request 3: Create Teacher Account (Librarian Only)
+* **Method**: `POST`
+* **URL**: `{{baseUrl}}/api/admin/users`
+* **Headers**:
+  * `Content-Type: application/json`
+  * `Authorization: Bearer {{adminToken}}`
+* **Body** (`raw` - JSON):
+  ```json
+  {
+    "username": "guru_matematika",
+    "password": "password123",
+    "fullName": "Budi Santoso, S.Pd.",
+    "role": "TEACHER"
+  }
+  ```
+* **Expected Response** (`201 Created`):
+  ```json
+  {
+    "id": 2,
+    "username": "guru_matematika",
+    "fullName": "Budi Santoso, S.Pd.",
+    "role": "TEACHER",
+    "active": true
+  }
+  ```
 
-#### 4. Teacher Login (`POST /api/auth/login`)
-```powershell
-$teacherLoginBody = @{
-    username = "guru_matematika"
-    password = "password123"
-} | ConvertTo-Json
+---
 
-$teacherResponse = Invoke-RestMethod -Uri http://localhost:8081/api/auth/login -Method Post -ContentType "application/json" -Body $teacherLoginBody
-$teacherToken = $teacherResponse.token
-$teacherResponse
-```
+### Request 4: Teacher Login
+* **Method**: `POST`
+* **URL**: `{{baseUrl}}/api/auth/login`
+* **Headers**:
+  * `Content-Type: application/json`
+* **Body** (`raw` - JSON):
+  ```json
+  {
+    "username": "guru_matematika",
+    "password": "password123"
+  }
+  ```
+* **Postman Tests Script**:
+  ```javascript
+  pm.test("Status code is 200", function () {
+      pm.response.to.have.status(200);
+      var jsonData = pm.response.json();
+      pm.environment.set("teacherToken", jsonData.token);
+  });
+  ```
+* **Expected Response** (`200 OK`):
+  ```json
+  {
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "user": {
+      "id": 2,
+      "username": "guru_matematika",
+      "fullName": "Budi Santoso, S.Pd.",
+      "role": "TEACHER",
+      "active": true
+    }
+  }
+  ```
 
-#### 5. Verify Role Authorization Protection
-Verify that the teacher token is blocked from accessing the librarian-only `/api/admin/users` endpoint:
-```powershell
-$teacherHeaders = @{ Authorization = "Bearer $teacherToken" }
+---
 
-try {
-    Invoke-RestMethod -Uri http://localhost:8081/api/admin/users -Headers $teacherHeaders
-} catch {
-    $_.Exception.Response.StatusCode
-    $_.ErrorDetails.Message
-}
-```
-* **Expected result:** Status `403 Forbidden` (`FORBIDDEN`).
+### Request 5: Role Authorization Check (Teacher Forbidden on Admin Endpoint)
+* **Method**: `GET`
+* **URL**: `{{baseUrl}}/api/admin/users`
+* **Headers**:
+  * `Authorization: Bearer {{teacherToken}}`
+* **Expected Response** (`403 Forbidden`):
+  ```json
+  {
+    "status": 403,
+    "code": "FORBIDDEN",
+    "message": "Access Denied"
+  }
+  ```
 
-#### 6. Password Change (`POST /api/auth/change-password`)
-```powershell
-$changePassBody = @{
-    oldPassword = "password123"
-    newPassword = "newPassword456"
-} | ConvertTo-Json
+---
 
-Invoke-RestMethod -Uri http://localhost:8081/api/auth/change-password -Method Post -ContentType "application/json" -Headers $teacherHeaders -Body $changePassBody
-```
+### Request 6: Change Password
+* **Method**: `POST`
+* **URL**: `{{baseUrl}}/api/auth/change-password`
+* **Headers**:
+  * `Content-Type: application/json`
+  * `Authorization: Bearer {{teacherToken}}`
+* **Body** (`raw` - JSON):
+  ```json
+  {
+    "oldPassword": "password123",
+    "newPassword": "newPassword456"
+  }
+  ```
+* **Expected Response** (`200 OK`):
+  ```json
+  {
+    "message": "Password changed successfully"
+  }
+  ```
 
-#### 7. Verify Anonymous Access Remains Open
-```powershell
-Invoke-RestMethod -Uri http://localhost:8081/actuator/health
-```
-* **Expected result:** Returns `UP` without requiring an `Authorization` header.
+---
+
+### Request 7: Anonymous Health Check
+* **Method**: `GET`
+* **URL**: `{{baseUrl}}/actuator/health`
+* **Headers**: *(None)*
+* **Expected Response** (`200 OK`):
+  ```json
+  {
+    "status": "UP"
+  }
+  ```

@@ -1,5 +1,6 @@
 package id.sch.sman11garut.library.book;
 
+import id.sch.sman11garut.library.common.Visibility;
 import jakarta.persistence.criteria.Predicate;
 import java.util.ArrayList;
 import java.util.List;
