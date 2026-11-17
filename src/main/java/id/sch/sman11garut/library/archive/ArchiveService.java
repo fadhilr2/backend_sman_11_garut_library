@@ -7,6 +7,8 @@ import id.sch.sman11garut.library.common.AppException;
 import id.sch.sman11garut.library.common.PageResponse;
 import id.sch.sman11garut.library.common.Visibility;
 import id.sch.sman11garut.library.media.ArchiveItemCreatedEvent;
+import id.sch.sman11garut.library.stats.DownloadEvent;
+import id.sch.sman11garut.library.stats.ItemType;
 import id.sch.sman11garut.library.storage.FileStorageService;
 import id.sch.sman11garut.library.storage.RangeFileResponder;
 import id.sch.sman11garut.library.storage.StorageCategory;
@@ -140,7 +142,7 @@ public class ArchiveService {
         }
     }
 
-    @Transactional
+    @Transactional(readOnly = true)
     public void downloadArchiveFile(Long id, boolean isStaff, HttpServletRequest request, HttpServletResponse response) {
         ArchiveItem item = archiveRepository.findByIdAndDeletedAtIsNull(id)
                 .orElseThrow(() -> AppException.notFound("Archive item not found with id: " + id));
@@ -149,7 +151,7 @@ public class ArchiveService {
             throw AppException.notFound("Archive item not found with id: " + id);
         }
 
-        archiveRepository.incrementViewCount(item.getId());
+        eventPublisher.publishEvent(new DownloadEvent(ItemType.ARCHIVE, item.getId(), Instant.now()));
 
         Resource resource = fileStorageService.loadAsResource(item.getStoredPath());
         response.setHeader(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + item.getOriginalName() + "\"");

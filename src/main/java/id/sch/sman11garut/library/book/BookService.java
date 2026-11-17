@@ -6,6 +6,8 @@ import id.sch.sman11garut.library.category.CategoryService;
 import id.sch.sman11garut.library.common.AppException;
 import id.sch.sman11garut.library.common.PageResponse;
 import id.sch.sman11garut.library.common.Visibility;
+import id.sch.sman11garut.library.stats.DownloadEvent;
+import id.sch.sman11garut.library.stats.ItemType;
 import id.sch.sman11garut.library.storage.FileStorageService;
 import id.sch.sman11garut.library.storage.RangeFileResponder;
 import id.sch.sman11garut.library.storage.StorageCategory;
@@ -20,6 +22,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.Resource;
 import org.springframework.data.domain.Page;
@@ -49,18 +52,21 @@ public class BookService {
     private final UserRepository userRepository;
     private final FileStorageService fileStorageService;
     private final RangeFileResponder rangeFileResponder;
+    private final ApplicationEventPublisher eventPublisher;
 
     public BookService(
             BookRepository bookRepository,
             CategoryService categoryService,
             UserRepository userRepository,
             FileStorageService fileStorageService,
-            RangeFileResponder rangeFileResponder) {
+            RangeFileResponder rangeFileResponder,
+            ApplicationEventPublisher eventPublisher) {
         this.bookRepository = bookRepository;
         this.categoryService = categoryService;
         this.userRepository = userRepository;
         this.fileStorageService = fileStorageService;
         this.rangeFileResponder = rangeFileResponder;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional(readOnly = true)
@@ -120,7 +126,7 @@ public class BookService {
         }
     }
 
-    @Transactional
+    @Transactional(readOnly = true)
     public void downloadBookFile(Long id, boolean isStaff, HttpServletRequest request, HttpServletResponse response) {
         Book book = bookRepository.findByIdAndDeletedAtIsNull(id)
                 .orElseThrow(() -> AppException.notFound("Book not found with id: " + id));
@@ -129,7 +135,7 @@ public class BookService {
             throw AppException.notFound("Book not found with id: " + id);
         }
 
-        bookRepository.incrementDownloadCount(book.getId());
+        eventPublisher.publishEvent(new DownloadEvent(ItemType.BOOK, book.getId(), Instant.now()));
 
         Resource resource = fileStorageService.loadAsResource(book.getStoredPath());
         response.setHeader(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + book.getOriginalName() + "\"");

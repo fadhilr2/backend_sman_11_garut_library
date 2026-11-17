@@ -1,5 +1,6 @@
 package id.sch.sman11garut.library.book;
 
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -20,6 +21,13 @@ public interface BookRepository extends JpaRepository<Book, Long>, JpaSpecificat
     Optional<Book> findByIdAndDeletedAtIsNull(Long id);
 
     Page<Book> findByUploadedByIdAndDeletedAtIsNullOrderByCreatedAtDesc(Long userId, Pageable pageable);
+
+    long countByDeletedAtIsNull();
+
+    List<Book> findTop5ByDeletedAtIsNullOrderByDownloadCountDesc();
+
+    @Query("SELECT b.bookType, COUNT(b) FROM Book b WHERE b.deletedAt IS NULL GROUP BY b.bookType")
+    List<Object[]> countGroupedByBookType();
 
     @Modifying
     @Query("UPDATE Book b SET b.downloadCount = b.downloadCount + 1 WHERE b.id = :id")

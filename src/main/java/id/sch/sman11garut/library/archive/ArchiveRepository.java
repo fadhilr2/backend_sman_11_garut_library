@@ -1,5 +1,6 @@
 package id.sch.sman11garut.library.archive;
 
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -18,6 +19,11 @@ public interface ArchiveRepository extends JpaRepository<ArchiveItem, Long>, Jpa
     Optional<ArchiveItem> findByIdAndDeletedAtIsNull(Long id);
 
     Page<ArchiveItem> findByUploadedByIdAndDeletedAtIsNullOrderByCreatedAtDesc(Long userId, Pageable pageable);
+
+    long countByDeletedAtIsNull();
+
+    @Query("SELECT a.mediaType, COUNT(a) FROM ArchiveItem a WHERE a.deletedAt IS NULL GROUP BY a.mediaType")
+    List<Object[]> countGroupedByMediaType();
 
     @Modifying
     @Query("UPDATE ArchiveItem a SET a.viewCount = a.viewCount + 1 WHERE a.id = :id")
