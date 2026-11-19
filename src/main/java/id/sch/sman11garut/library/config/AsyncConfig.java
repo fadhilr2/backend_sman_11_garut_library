@@ -31,4 +31,16 @@ public class AsyncConfig {
         executor.initialize();
         return executor;
     }
+
+    // Single thread: bulk imports run one at a time and never compete with each other for disk I/O.
+    @Bean("importExecutor")
+    public Executor importExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(1);
+        executor.setQueueCapacity(5);
+        executor.setThreadNamePrefix("import-");
+        executor.initialize();
+        return executor;
+    }
 }

@@ -44,6 +44,36 @@ public class CategoryService {
                 .orElseThrow(() -> AppException.notFound("Book category not found with id: " + id));
     }
 
+    /**
+     * Returns the id of the book category with this name, creating a top-level one if missing.
+     * Blank names return {@code null} (no category). Used by bulk import.
+     */
+    @Transactional
+    public Integer findOrCreateBookCategoryId(String name) {
+        if (name == null || name.isBlank()) {
+            return null;
+        }
+        String trimmed = name.trim();
+        return bookCategoryRepository.findByName(trimmed)
+                .orElseGet(() -> bookCategoryRepository.save(new BookCategory(trimmed, null)))
+                .getId();
+    }
+
+    /**
+     * Returns the id of the archive category with this name, creating a top-level one if missing.
+     * Blank names return {@code null} (no category). Used by bulk import.
+     */
+    @Transactional
+    public Integer findOrCreateArchiveCategoryId(String name) {
+        if (name == null || name.isBlank()) {
+            return null;
+        }
+        String trimmed = name.trim();
+        return archiveCategoryRepository.findByName(trimmed)
+                .orElseGet(() -> archiveCategoryRepository.save(new ArchiveCategory(trimmed, null)))
+                .getId();
+    }
+
     @Transactional
     public CategoryDto createCategory(CreateCategoryRequest request) {
         CategoryType type = request.resolveType();

@@ -15,10 +15,12 @@ import javax.imageio.ImageIO;
 import net.coobird.thumbnailator.Thumbnails;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 @Component
 public class MediaProcessor {
@@ -40,9 +42,10 @@ public class MediaProcessor {
         this.storageProperties = storageProperties;
     }
 
+    // AFTER_COMMIT: the archive row must be committed before we update it from another thread.
     @Async("mediaExecutor")
-    @EventListener
-    @Transactional
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void onArchiveItemCreated(ArchiveItemCreatedEvent event) {
         try {
             Path sourcePath = fileStorageService.resolveSafePath(event.storedPath());

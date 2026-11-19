@@ -14,7 +14,7 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface BookRepository extends JpaRepository<Book, Long>, JpaSpecificationExecutor<Book> {
 
-    boolean existsByChecksumSha256AndDeletedAtIsNull(String checksumSha256);
+    boolean existsByChecksumSha256(String checksumSha256);
 
     boolean existsByCategoryIdAndDeletedAtIsNull(Integer categoryId);
 

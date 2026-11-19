@@ -18,6 +18,7 @@ import id.sch.sman11garut.library.user.UserRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import org.slf4j.Logger;
@@ -187,15 +188,9 @@ public class BookService {
 
         StoredFileInfo storedFile;
         try {
-            storedFile = fileStorageService.storeFile(file.getInputStream(), file.getOriginalFilename(), StorageCategory.BOOK);
+            storedFile = storeUniqueBookFile(file.getInputStream(), file.getOriginalFilename());
         } catch (IOException ex) {
             throw AppException.badRequest("STORAGE_FAILED", "Failed to stream uploaded book file");
-        }
-
-        // Deduplication check
-        if (bookRepository.existsByChecksumSha256AndDeletedAtIsNull(storedFile.checksumSha256())) {
-            fileStorageService.deleteStoredFile(storedFile.relativePath());
-            throw AppException.conflict("DUPLICATE_FILE", "A book with the same file content already exists");
         }
 
         StoredFileInfo storedCover = null;
@@ -208,6 +203,34 @@ public class BookService {
             }
         }
 
+        return persistNewBook(storedFile, storedCover, metadata, principal);
+    }
+
+    /**
+     * Creates a book from a raw stream (used by bulk import). Goes through the same
+     * storage, duplicate check and compensation path as a normal upload.
+     * Bulk-imported books have no uploader ({@code uploaded_by = NULL}).
+     */
+    @Transactional
+    public BookDetailDto createBookFromStream(InputStream content, String originalFilename, BookMetadataRequest metadata) {
+        StoredFileInfo storedFile = storeUniqueBookFile(content, originalFilename);
+        return persistNewBook(storedFile, null, metadata, null);
+    }
+
+    private StoredFileInfo storeUniqueBookFile(InputStream content, String originalFilename) {
+        StoredFileInfo storedFile = fileStorageService.storeFile(content, originalFilename, StorageCategory.BOOK);
+        if (bookRepository.existsByChecksumSha256(storedFile.checksumSha256())) {
+            fileStorageService.deleteStoredFile(storedFile.relativePath());
+            throw AppException.conflict("DUPLICATE_FILE", "A book with the same file content already exists (it may be in the trash)");
+        }
+        return storedFile;
+    }
+
+    private BookDetailDto persistNewBook(
+            StoredFileInfo storedFile,
+            StoredFileInfo storedCover,
+            BookMetadataRequest metadata,
+            UserPrincipal principal) {
         try {
             BookCategory category = metadata.categoryId() != null
                     ? categoryService.getBookCategoryEntity(metadata.categoryId())
@@ -314,9 +337,9 @@ public class BookService {
 
         // Deduplication check (exclude current book's existing checksum)
         if (!newStored.checksumSha256().equalsIgnoreCase(book.getChecksumSha256())
-                && bookRepository.existsByChecksumSha256AndDeletedAtIsNull(newStored.checksumSha256())) {
+                && bookRepository.existsByChecksumSha256(newStored.checksumSha256())) {
             fileStorageService.deleteStoredFile(newStored.relativePath());
-            throw AppException.conflict("DUPLICATE_FILE", "A book with the same file content already exists");
+            throw AppException.conflict("DUPLICATE_FILE", "A book with the same file content already exists (it may be in the trash)");
         }
 
         String oldPath = book.getStoredPath();

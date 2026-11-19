@@ -19,6 +19,7 @@ import id.sch.sman11garut.library.user.UserRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import org.slf4j.Logger;
@@ -193,17 +194,37 @@ public class ArchiveService {
 
         StoredFileInfo storedFile;
         try {
-            storedFile = fileStorageService.storeFile(
-                    file.getInputStream(), file.getOriginalFilename(), StorageCategory.ARCHIVE);
+            storedFile = storeUniqueArchiveFile(file.getInputStream(), file.getOriginalFilename());
         } catch (IOException ex) {
             throw AppException.badRequest("STORAGE_FAILED", "Failed to stream uploaded archive file");
         }
 
-        if (archiveRepository.existsByChecksumSha256AndDeletedAtIsNull(storedFile.checksumSha256())) {
-            fileStorageService.deleteStoredFile(storedFile.relativePath());
-            throw AppException.conflict("DUPLICATE_FILE", "An archive item with the same file content already exists");
-        }
+        return persistNewArchiveItem(storedFile, metadata, principal);
+    }
 
+    /**
+     * Creates an archive item from a raw stream (used by bulk import). Same storage,
+     * duplicate check, compensation and thumbnail event as a normal upload.
+     * Bulk-imported items have no uploader ({@code uploaded_by = NULL}).
+     */
+    @Transactional
+    public ArchiveDetailDto createArchiveItemFromStream(
+            InputStream content, String originalFilename, ArchiveMetadataRequest metadata) {
+        StoredFileInfo storedFile = storeUniqueArchiveFile(content, originalFilename);
+        return persistNewArchiveItem(storedFile, metadata, null);
+    }
+
+    private StoredFileInfo storeUniqueArchiveFile(InputStream content, String originalFilename) {
+        StoredFileInfo storedFile = fileStorageService.storeFile(content, originalFilename, StorageCategory.ARCHIVE);
+        if (archiveRepository.existsByChecksumSha256(storedFile.checksumSha256())) {
+            fileStorageService.deleteStoredFile(storedFile.relativePath());
+            throw AppException.conflict("DUPLICATE_FILE", "An archive item with the same file content already exists (it may be in the trash)");
+        }
+        return storedFile;
+    }
+
+    private ArchiveDetailDto persistNewArchiveItem(
+            StoredFileInfo storedFile, ArchiveMetadataRequest metadata, UserPrincipal principal) {
         try {
             ArchiveCategory category = metadata.categoryId() != null
                     ? archiveCategoryRepository.findById(metadata.categoryId())

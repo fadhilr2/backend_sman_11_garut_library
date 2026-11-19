@@ -14,7 +14,7 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface ArchiveRepository extends JpaRepository<ArchiveItem, Long>, JpaSpecificationExecutor<ArchiveItem> {
 
-    boolean existsByChecksumSha256AndDeletedAtIsNull(String checksumSha256);
+    boolean existsByChecksumSha256(String checksumSha256);
 
     Optional<ArchiveItem> findByIdAndDeletedAtIsNull(Long id);
 

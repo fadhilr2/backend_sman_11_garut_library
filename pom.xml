@@ -135,6 +135,11 @@
     		<scope>compile</scope>
 		</dependency>
 		<dependency>
+			<groupId>org.apache.commons</groupId>
+			<artifactId>commons-csv</artifactId>
+			<version>1.14.1</version>
+		</dependency>
+		<dependency>
     		<groupId>net.coobird</groupId>
     		<artifactId>thumbnailator</artifactId>
     		<version>0.4.21</version>
