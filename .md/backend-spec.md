@@ -1,165 +1,194 @@
 # Backend Spec: Perpustakaan Digital Lokal SMAN 11 Garut
 
-Stack: Spring Boot 3 (Java 17+), Spring Data JPA, Spring Security, Flyway, MySQL 8, Nginx in front.
-Users: students are anonymous (no accounts). Only TEACHER and LIBRARIAN log in. Uploads publish immediately (no approval).
+> The API contract for the front-end. **What** the backend does, not how. Design lives in [backend-architecture.md](backend-architecture.md); schedule in [backend-phases.md](backend-phases.md).
 
-The system has two content areas that share the same storage, auth and category mechanism:
+## 1. Overview
 
-- **Books**: ebooks, teaching modules, question banks, slides (the core of the proposal).
-- **Archive**: school archive of images, videos and documents (extra scope, built on the same pieces).
+- **Users**: students are anonymous (no accounts). Only `TEACHER` and `LIBRARIAN` log in.
+- **Publishing**: uploads are published immediately (no approval step).
+- **Content areas** (share the same storage, auth and category mechanism):
+  - **Books**: ebooks, teaching modules, question banks, slides. The core of the proposal.
+  - **Archive**: school images, videos and documents. Extra scope built on the same pieces.
+- **Network**: offline school LAN. Nginx serves the front-end and proxies `/api` to Spring Boot.
 
-## 1. Access rules
+---
+
+## 2. Roles & access
 
 | Action | Anonymous (student) | TEACHER | LIBRARIAN |
 |---|---|---|---|
 | Browse/read/download `PUBLIC` books and archive items | yes | yes | yes |
-| View `STAFF` items (archive defaults to STAFF) | no | yes | yes |
+| View `STAFF` items | no (404) | yes | yes |
 | Upload book / archive item | no | yes | yes |
 | Edit/delete book / archive item | no | own only | any |
-| Manage categories, users, import, stats | no | no | yes |
+| Manage categories, users, import, stats, restore | no | no | yes |
 
-Auth: `POST /api/auth/login` returns a JWT (8 h expiry). Send as `Authorization: Bearer <token>`. Passwords hashed with BCrypt.
+- **Login**: `POST /api/auth/login` returns a JWT valid for 8 hours. Send it as `Authorization: Bearer <token>`.
+- **Passwords**: BCrypt. Repeated failed logins are temporarily locked (`ACCOUNT_TEMPORARILY_LOCKED`).
+- **Hidden, not forbidden**: a `STAFF` item requested anonymously returns `404`, so its existence is not revealed.
+- **No uploader**: bulk-imported items have no uploader; only librarians can edit them.
 
-## 2. Endpoints
+---
 
-### Public: Books
-| Method | Path | Notes |
-|---|---|---|
-| GET | `/api/books` | Query: `q`, `categoryId`, `grade`, `type`, `page`, `size`, `sort` (`newest`, `title`, `popular`). `q` uses FULLTEXT (fallback to LIKE for short terms). Only PUBLIC unless caller is staff. |
-| GET | `/api/books/{id}` | Metadata. 404 if STAFF and caller anonymous. |
-| GET | `/api/books/{id}/file` | Stream inline (in-browser reader). Supports HTTP `Range`. |
-| GET | `/api/books/{id}/download` | Same file as attachment; logs the download and increments `download_count`. |
-| GET | `/api/books/{id}/cover` | Cover image, or default placeholder. |
+## 3. Endpoints
 
-### Public: Archive
-| Method | Path | Notes |
-|---|---|---|
-| GET | `/api/archive` | Query: `q`, `categoryId`, `mediaType` (IMAGE/VIDEO/DOCUMENT), `from`, `to` (event date), `page`, `size`, `sort` (`newest`, `eventDate`, `title`). |
-| GET | `/api/archive/{id}` | Metadata (dimensions, duration, event date). |
-| GET | `/api/archive/{id}/file` | Inline stream. **Range support is required** so videos can play and seek. |
-| GET | `/api/archive/{id}/download` | Attachment; logged. |
-| GET | `/api/archive/{id}/thumbnail` | Generated thumbnail (image or video poster frame). |
+`Phase` = the roadmap phase that delivers it. All paths are under `/api`.
 
-### Public: Shared
-| Method | Path | Notes |
-|---|---|---|
-| GET | `/api/categories?type=BOOK\|ARCHIVE` | Category list (tree via `parentId`). |
-| GET | `/api/meta/filters` | Grade levels, book types, media types, curricula for filter dropdowns. |
-| GET | `/api/health` | DB reachable + storage mounted. |
+### 3.1 Public: Books
+| Method | Path | Notes | Phase |
+|---|---|---|---|
+| GET | `/books` | Query: `q`, `categoryId`, `grade`, `type`, `page`, `size`, `sort` (`newest`, `title`, `popular`). Only `PUBLIC` unless the caller is staff. | 3 |
+| GET | `/books/{id}` | Metadata. | 3 |
+| GET | `/books/{id}/file` | Inline stream (in-browser reader). Supports HTTP `Range`. | 3 |
+| GET | `/books/{id}/download` | Same file as attachment. Logs the download and increments `downloadCount` (async). | 3, 5 |
+| GET | `/books/{id}/cover` | Cover image, or an SVG placeholder. | 3 |
 
-### Auth
-| Method | Path | Notes |
-|---|---|---|
-| POST | `/api/auth/login` | `{username, password}` -> `{token, user}` |
-| GET | `/api/auth/me` | Current user |
-| POST | `/api/auth/change-password` | `{oldPassword, newPassword}` |
+### 3.2 Public: Archive
+| Method | Path | Notes | Phase |
+|---|---|---|---|
+| GET | `/archive` | Query: `q`, `categoryId`, `mediaType` (`IMAGE`/`VIDEO`/`DOCUMENT`), `from`, `to` (event date), `page`, `size`, `sort` (`newest`, `title`, `popular`, `date` = event date). | 4 |
+| GET | `/archive/{id}` | Metadata incl. width, height, duration, event date. | 4 |
+| GET | `/archive/{id}/file` | Inline stream. **Range support is required** so videos can play and seek. | 4 |
+| GET | `/archive/{id}/download` | Attachment. Logged and increments `viewCount` (async). | 4, 5 |
+| GET | `/archive/{id}/thumbnail` | Generated thumbnail (image or video poster frame), or an SVG placeholder per media type. | 4 |
 
-### Teacher + Librarian
-| Method | Path | Notes |
-|---|---|---|
-| POST | `/api/books` | `multipart/form-data`: `file`, optional `cover`, `metadata` (JSON). Validates type, size, checksum (409 on duplicate). |
-| PUT | `/api/books/{id}` | Update metadata (own, or any for librarian). |
-| PUT | `/api/books/{id}/file` | Replace file. |
-| DELETE | `/api/books/{id}` | Soft delete (own, or any for librarian). |
-| GET | `/api/books/mine` | Uploads by current user. |
-| POST | `/api/archive` | `multipart/form-data`: `file`, `metadata` (JSON: title, description, categoryId, eventDate, visibility). `mediaType` is detected from the file. |
-| PUT | `/api/archive/{id}` | Update metadata. |
-| DELETE | `/api/archive/{id}` | Soft delete. |
-| GET | `/api/archive/mine` | Uploads by current user. |
+### 3.3 Public: Shared
+| Method | Path | Notes | Phase |
+|---|---|---|---|
+| GET | `/categories?type=BOOK\|ARCHIVE` | Category list (tree via `parentId` / `children`). Default `BOOK`. | 3 |
+| GET | `/meta/filters` | Grade levels, book types, media types, curricula for filter dropdowns. | 3 |
+| GET | `/health` | DB reachable + storage mounted and writable. *(Until then: `/actuator/health`.)* | 7 (planned) |
 
-### Librarian only
-| Method | Path | Notes |
-|---|---|---|
-| POST/PUT/DELETE | `/api/admin/categories[/{id}]` | Category CRUD (`type`, `name`, `parentId`). Delete blocked if in use, or reassign. |
-| GET/POST/PUT | `/api/admin/users[/{id}]` | Create teachers, reset password, deactivate. |
-| POST | `/api/admin/import` | Body: `{target: "BOOK"\|"ARCHIVE"}`. Starts bulk import from the server folder (see section 4). Returns `jobId`. |
-| GET | `/api/admin/import/{jobId}` | Progress and per-row error report. |
-| GET | `/api/admin/stats` | Totals, downloads per day/week, top books, counts by type/media type. |
-| GET | `/api/admin/storage` | Disk used/free on the 1 TB drive, plus breakdown: books vs archive images vs videos. |
-| POST | `/api/admin/books/{id}/restore`, `/api/admin/archive/{id}/restore` | Undo soft delete. |
+### 3.4 Auth
+| Method | Path | Notes | Phase |
+|---|---|---|---|
+| POST | `/auth/login` | `{username, password}` → `{token, user}` | 1 |
+| GET | `/auth/me` | Current user. | 1 |
+| POST | `/auth/change-password` | `{oldPassword, newPassword}` (min 6 chars). | 1 |
 
-Error format (all endpoints): `{ "status": 409, "code": "DUPLICATE_FILE", "message": "..." }`.
+### 3.5 Teacher + Librarian
+| Method | Path | Notes | Phase |
+|---|---|---|---|
+| POST | `/books` | `multipart/form-data`: `file`, optional `cover`, `metadata` (JSON). 409 on duplicate content. | 3 |
+| PUT | `/books/{id}` | Update metadata (own, or any for librarian). | 3 |
+| PUT | `/books/{id}/file` | Replace the file. | 3 |
+| DELETE | `/books/{id}` | Soft delete. | 3 |
+| GET | `/books/mine` | Uploads by the current user. | 3 |
+| POST | `/archive` | `multipart/form-data`: `file`, `metadata` (JSON: `title`, `description`, `categoryId`, `eventDate`, `visibility`). `mediaType` is detected from the file. | 4 |
+| PUT | `/archive/{id}` | Update metadata. | 4 |
+| DELETE | `/archive/{id}` | Soft delete. | 4 |
+| GET | `/archive/mine` | Uploads by the current user. | 4 |
 
-## 3. Suggested package layout
+### 3.6 Librarian only
+| Method | Path | Notes | Phase |
+|---|---|---|---|
+| GET/POST/PUT | `/admin/users[/{id}]` | Create teachers, reset password, deactivate. | 1 |
+| POST/PUT/DELETE | `/admin/categories[/{id}]` | Category CRUD (`type`, `name`, `parentId`). Delete is blocked while the category is in use. | 3 |
+| POST | `/admin/books/{id}/restore`, `/admin/archive/{id}/restore` | Undo soft delete. | 3, 4 |
+| GET | `/admin/stats` | Totals, downloads today/this week, 7-day trend, top books, counts by type/media type. | 5 |
+| POST | `/admin/import` | Body `{"target": "BOOK"\|"ARCHIVE"}`. Starts a bulk import from the server folder (see §5.5). `202 Accepted` + job. | 6 |
+| GET | `/admin/import/{jobId}` | Job progress and per-row error report. | 6 |
+| GET | `/admin/import` | 20 most recent import jobs. | 6 |
+| GET | `/admin/storage` | Disk used/free, plus breakdown: books vs archive images vs videos. | 7 (planned) |
 
+---
+
+## 4. Errors
+
+Every error uses the same body:
+```json
+{ "status": 409, "code": "DUPLICATE_FILE", "message": "A book with the same file content already exists (it may be in the trash)" }
 ```
-id.sch.sman11garut.library
-  config/        SecurityConfig, JwtFilter, StorageProperties
-  auth/          AuthController, JwtService, UserDetailsServiceImpl
-  user/          User, UserRepository, UserService, UserAdminController
-  category/      Category, CategoryRepository, CategoryController, CategoryAdminController
-  book/          Book, BookRepository (+Specification), BookService, BookController
-  archive/       ArchiveItem, ArchiveRepository (+Specification), ArchiveService,
-                 ArchiveController, MediaProcessor (thumbnails, ffprobe)
-  storage/       FileStorageService (save/load/delete, checksum, path safety),
-                 RangeFileResponder (shared Range streaming for books + archive)
-  stats/         DownloadLog, StatsService, AdminStatsController
-  importer/      ImportJob, BulkImportService (BOOK and ARCHIVE strategies), ImportController
-  common/        GlobalExceptionHandler, ApiError
-```
+Validation errors add a `fields` object (`{"title": "Title is required"}`).
 
-Key `application.yml` settings:
+| Status | Code | When |
+|---|---|---|
+| 400 | `VALIDATION_FAILED` | Request body fails Bean Validation. |
+| 400 | `INVALID_CREDENTIALS` | Wrong username/password, or inactive account. |
+| 400 | `ACCOUNT_TEMPORARILY_LOCKED` | Too many failed logins. |
+| 400 | `INVALID_OLD_PASSWORD`, `SAME_PASSWORD` | Change password. |
+| 400 | `CANNOT_DEACTIVATE_SELF`, `CANNOT_DEACTIVATE_LAST_LIBRARIAN` | User admin. |
+| 400 | `FILE_REQUIRED` | Upload without a file. |
+| 400 | `INVALID_FILE_TYPE` | Type not allowed, or extension does not match content. |
+| 400 | `INVALID_PATH` | Stored path escapes the storage root. |
+| 400 | `STORAGE_FAILED` | Upload stream could not be read. |
+| 400 | `INVALID_PARENT` | Category set as its own parent. |
+| 400 | `IMPORT_CSV_NOT_FOUND`, `IMPORT_DIR_NOT_CONFIGURED` | Bulk import. |
+| 401 | `UNAUTHORIZED` | Protected endpoint called without a valid token. |
+| 403 | `FORBIDDEN` | Wrong role, or editing someone else's item. |
+| 404 | `NOT_FOUND` | Missing, soft-deleted, or `STAFF` item requested anonymously. |
+| 409 | `DUPLICATE_FILE` | Same file content already stored (including items in the trash). |
+| 409 | `DUPLICATE_USERNAME`, `DUPLICATE_CATEGORY` | Unique name taken. |
+| 409 | `CATEGORY_IN_USE` | Deleting a category that still has books. |
+| 409 | `IMPORT_ALREADY_RUNNING` | Another import job is RUNNING. |
+| 500 | `STORAGE_WRITE_FAILED`, `INTERNAL_ERROR` | Server-side failure. |
+| 503 | `STORAGE_FULL` | Free disk space under `app.storage.min-free-space`. |
+| 503 | `IMPORT_QUEUE_FULL` | Import executor queue full. |
+
+---
+
+## 5. Business rules
+
+### 5.1 Visibility and defaults
+- `visibility`: `PUBLIC` (anyone on the Wi-Fi) or `STAFF` (logged-in staff only).
+- Books default to `PUBLIC`, `EBOOK`, grade `ALL`. Archive items default to `STAFF`.
+- Enums: book `type` = `EBOOK`, `TEACHING_MODULE`, `QUESTION_BANK`, `SLIDES`, `OTHER`; `grade` = `X`, `XI`, `XII`, `ALL`; `mediaType` = `IMAGE`, `VIDEO`, `DOCUMENT`.
+
+### 5.2 Storage and duplicates
+- Files are stored as `<root>/{books|archive|thumbnails}/<yyyy>/<MM>/<uuid>.<ext>` (book covers go under `books/`). User-supplied names are never used on disk; the original name is kept in the DB for downloads.
+- Uploads are streamed to disk (never fully in memory), hashed with SHA-256, and atomically moved into place.
+- Same SHA-256 as an existing item (active **or** soft-deleted) → `409 DUPLICATE_FILE`.
+- Uploads are rejected with `503 STORAGE_FULL` when free space is under the threshold (default 5 GB).
+
+### 5.3 Allowed file types
+- **Books**: pdf, epub, docx, pptx, xlsx. **Covers**: jpg, png.
+- **Archive**: images jpg, png, webp, gif; videos mp4 (H.264/AAC), webm, mkv; documents as books.
+- Type is sniffed from content (Apache Tika). Executables and extension/content mismatches are rejected.
+
+### 5.4 Streaming, thumbnails, search
+- **Range**: single range, `206 Partial Content`, `Accept-Ranges`, `ETag`, `Last-Modified`; invalid range → `416`. No transcoding: videos the browser can't decode are still downloadable.
+- **Thumbnails** (archive, async): images → ~400 px JPEG + width/height; videos → frame at 1 s + duration/width/height via `ffmpeg`/`ffprobe` if installed, otherwise null fields and a placeholder.
+- **Search**: MySQL FULLTEXT on `title, author, description` (books) and `title, description` (archive) for queries of 3+ characters; `LIKE` for shorter ones. Results are paged.
+
+### 5.5 Bulk import
+- The librarian copies files plus a CSV into the import folder, then calls `POST /admin/import`:
+  - `{import-dir}/books/books.csv` with `filename,title,author,publisher,year,type,category,grade,curriculum,visibility`
+  - `{import-dir}/archive/archive.csv` with `filename,title,description,category,eventDate,visibility`
+- Only `filename` is required; blank cells use the defaults in §5.1; a blank title becomes the file name.
+- UTF-8 (BOM allowed), `,` or `;` delimiter, case-insensitive headers and enum values. `year` = 4 digits, `eventDate` = `YYYY-MM-DD`.
+- Rows go through the normal upload rules. Duplicates are counted as `skipped`; bad rows as `failed` with a message. One job runs at a time.
+- Unknown category names are **created automatically**. Source files are left in place, so re-running is safe.
+
+### 5.6 Soft delete
+- Deleting sets `deleted_at`; deleted items return 404 and are excluded from lists. Librarians can restore them.
+- *(Optional, not built)* a nightly cleanup removing files of items deleted over 30 days ago.
+
+---
+
+## 6. Configuration
+
 ```yaml
 app:
   storage:
-    root: /mnt/library/files        # mount point of the 1 TB HDD
-    import-dir: /mnt/library/import
+    root: /mnt/library/files        # 1 TB HDD mount (dev: ./data/storage)
+    import-dir: /mnt/library/import # (dev: ./data/import)
+    min-free-space: 5GB
   jwt:
     secret: ${JWT_SECRET}
     expiry-hours: 8
 spring:
-  servlet.multipart.max-file-size: 2GB     # videos
+  servlet.multipart.max-file-size: 2GB      # videos
   servlet.multipart.max-request-size: 2GB
-  jpa.hibernate.ddl-auto: validate         # Flyway owns the schema
+  jpa.hibernate.ddl-auto: validate          # Flyway owns the schema
 ```
-Nginx must match: `client_max_body_size 2g;` and raised `proxy_read_timeout` / `proxy_send_timeout` (e.g. 600s) for large uploads.
+- **First admin**: if no LIBRARIAN exists at startup, one is created from `ADMIN_USERNAME` / `ADMIN_PASSWORD` (dev fallback `admin` / `admin123`).
+- **Nginx** must match the upload limit: `client_max_body_size 2g;` and raised `proxy_read_timeout` / `proxy_send_timeout` (e.g. 600 s).
+- **CORS**: not needed in production; the front-end is served by the same Nginx.
 
-## 4. Implementation notes
+---
 
-**Storage (shared)**
-- Layout: `<root>/books/<yyyy>/<mm>/<uuid>.<ext>`, `<root>/archive/<yyyy>/<mm>/<uuid>.<ext>`, `<root>/thumbnails/<uuid>.jpg`. Never use user-supplied names on disk (prevents path traversal). Keep the original name in the DB for downloads.
-- Compute SHA-256 while saving. Duplicate checksum returns 409.
-- Stream uploads straight to disk (Spring multipart streaming); never load a whole video into memory. Write to a temp file in the same volume, then atomic rename.
-- Check free disk space before accepting an upload and return 507/409 with a clear message if the 1 TB drive is nearly full (e.g. under 5 GB free).
+## 7. Operations
 
-**Allowed types**
-- Books: pdf, epub, docx, pptx, xlsx; covers jpg/png.
-- Archive images: jpg, png, webp, gif. Videos: mp4 (H.264/AAC) and webm. Documents: pdf, docx, pptx, xlsx.
-- Check the extension and sniff the MIME type (e.g. Apache Tika); reject executables and mismatches.
-
-**Range streaming (books and archive)**
-- One shared component handling `Range` (single range is enough) using `ResourceRegion`, with `Accept-Ranges: bytes`, `206 Partial Content`, correct `Content-Type`, and caching headers (`ETag` or `Last-Modified`).
-- Videos play only if the browser can decode them. Recommend MP4 H.264/AAC. Transcoding is out of scope: unsupported files are still downloadable, and the UI should offer "Download" when the browser can't play them.
-
-**Thumbnails and media info (archive)**
-- Images: generate a ~400px JPEG thumbnail (Thumbnailator or ImageIO) and store width/height.
-- Videos: use `ffmpeg`/`ffprobe` if installed on the mini PC: poster frame at ~1 s, plus duration/width/height. If ffmpeg is missing, leave these null and fall back to a default icon. Run thumbnail generation asynchronously so the upload response is fast.
-- Install `ffmpeg` in the setup script and document it in the handbook.
-
-**Search**
-- `MATCH(title, author, description) AGAINST (:q IN NATURAL LANGUAGE MODE)` for books, `MATCH(title, description)` for archive. MySQL ignores words under 3 characters, so fall back to `LIKE %q%` for short queries.
-
-**Bulk import**
-- Librarian copies files plus a CSV into `import-dir` (USB/SFTP), then calls `/api/admin/import`.
-- Books CSV: `filename,title,author,publisher,year,type,category,grade,curriculum,visibility`.
-- Archive CSV: `filename,title,description,category,eventDate,visibility`.
-- Runs async (`@Async`), skips duplicates by checksum, records failures per row in `import_jobs.error_report`. Unknown category names are created automatically (or reported; pick one behavior).
-
-**Other**
-- **First admin**: on startup, if no LIBRARIAN exists, create one from `ADMIN_USERNAME` / `ADMIN_PASSWORD` env vars.
-- **Soft delete**: queries filter `deleted_at IS NULL`. A nightly cleanup (optional) removes files and `download_logs` rows for items deleted over 30 days ago.
-- **Health / degraded mode**: `/api/health` checks the storage root is mounted and writable. If the HDD is unplugged, catalog browsing still works and file endpoints return 503 with a clear message.
-- **Backups**: nightly `mysqldump` (keep the last 14). The 1 TB drive holds the files themselves, so decide whether the archive (photos/videos can't be re-downloaded) needs a second copy on another disk or USB drive. Document restore in the handbook.
-- **Capacity planning**: videos eat space quickly (roughly 0.5-1 GB per 10 min of 1080p). The `/api/admin/storage` breakdown lets the librarian see this before the disk fills.
-- **CORS**: the front-end is served from the same Nginx, so proxy `/api` to Spring on `localhost:8080` and no CORS is needed in production.
-
-## 5. Build order (months 3-5)
-
-1. Project setup, Flyway V1, entities/repositories, global error handling
-2. Auth (login, JWT, roles, first-admin seeding)
-3. Storage service + shared Range streaming
-4. Books: list/detail/search, upload, stream/download
-5. Categories, user admin, download logging
-6. Archive: upload, thumbnails/media info, stream (videos), list/search
-7. Bulk import (books, then archive), stats, storage/health endpoints
-8. Nginx config, systemd units, backup timer, handbook draft
+- **Health / degraded mode** *(Phase 7)*: `/api/health` checks the DB and that the storage root is mounted and writable. If the HDD is unplugged, browsing still works and file endpoints return 503.
+- **Backups**: nightly `mysqldump` (keep 14). Archive photos/videos can't be re-downloaded, so keep a second copy on another disk.
+- **Capacity**: 1080p video is roughly 0.5–1 GB per 10 minutes. `/api/admin/storage` shows usage before the disk fills.

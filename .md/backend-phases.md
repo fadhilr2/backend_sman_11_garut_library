@@ -1,71 +1,71 @@
-<h2>Development</h2>
+# Backend Roadmap: Perpustakaan Digital Lokal SMAN 11 Garut
 
-**Backend (code we write)**
+> **When and in what order** the backend is built. Each finished phase has its own doc with the exact changes and a Postman test guide. See [README.md](README.md) for how the docs fit together.
 
-- **Auth and roles**: JWT login for teachers and librarians only, first admin seeded from environment variables, and user admin.
-- **Categories**: generic, optionally nested, separate for books and archive.
-- **Storage service**: safe file naming, checksum duplicate detection, type validation, streaming uploads, and a free-space check.
-- **Range streaming**: shared by books and archive, and required for video playback.
-- **Books**: CRUD, upload, inline read, download, covers, and ownership rules with soft delete.
-- **Archive**: images, videos and documents, with event date and visibility.
-- **Media processing**: thumbnails, plus video poster and duration via `ffmpeg`.
-- **Search and browse**: filters plus MySQL FULLTEXT.
-- **Bulk import**: folder plus CSV, for both books and archive.
-- **Stats, storage usage, and health endpoint**.
+## 1. Status
 
-**Configuring (server and infrastructure, no app code)**
+| Phase | Scope | Status | Doc |
+|---|---|---|---|
+| 0 | Project setup | Done | — |
+| 1 | Auth and users | Done | [phase-1-auth.md](phase-1-auth.md) |
+| 2 | Storage foundation | Done | [phase-2-storage.md](phase-2-storage.md) |
+| 3 | Categories and books | Done | [phase-3-categories-books.md](phase-3-categories-books.md) |
+| 4 | Archive and media processing | Done | [phase-4-archive.md](phase-4-archive.md) |
+| 5 | Download counters and admin stats | Done | [phase-5-downloads-stats.md](phase-5-downloads-stats.md) |
+| 6 | Bulk import | Done | [phase-6-bulk-import.md](phase-6-bulk-import.md) |
+| 7 | Storage usage and health | Planned | — |
+| 8 | Hardening and handover prep | Planned | — |
 
-- **Mini PC OS**: Linux install, static IP or DHCP reservation, and `ffmpeg`, Java and MySQL installed.
-- **Router**: DHCP reservation for the mini PC, client isolation turned off (otherwise phones can’t reach the server), and a fixed address that goes on the poster or QR code.
-- **Nginx**: proxy `/api` to Spring, serve the front-end, 2 GB upload limit, and longer timeouts.
-- **External drive**: auto-mount by UUID, correct permissions, and a mount path that matches `app.storage.root`.
-- **systemd services**: Spring Boot, MySQL and Nginx start on boot and restart on failure.
-- **Backups**: nightly `mysqldump` with 14 copies kept, plus a second copy of the archive on another disk.
-- **Restore test**: actually restore a backup once to prove it works.
+---
 
-<h2>Phase 0: Project setup (in progress)</h2>
+## 2. Phases
 
-- **Done:** Initializr project with the core dependencies.
-- **Left:** add springdoc, JJWT, Tika and Thumbnailator to `pom.xml`, write `application.yml` with `dev` and `prod` profiles, add the Flyway `V1__init.sql`, create the feature packages, and add `ApiError` and `GlobalExceptionHandler`.
-- **Done when:** the app starts against a local MySQL, Flyway creates the tables, and `/actuator/health` returns UP.
+### Phase 0: Project setup
+- **Scope**: Initializr project; springdoc, JJWT, Tika and Thumbnailator in `pom.xml`; `application.yml` with `dev` and `prod` profiles; Flyway `V1__create_initial_schema.sql`; feature packages; `ApiError` and `GlobalExceptionHandler`.
+- **Done when**: the app starts against a local MySQL, Flyway creates the tables, and `/actuator/health` returns UP.
 
-<h2>Phase 1: Auth and users</h2>
+### Phase 1: Auth and users
+- **Scope**: User entity, BCrypt, JWT login, `JwtAuthFilter` (lets anonymous requests through), `SecurityConfig`. First librarian seeded from environment variables, change password, user admin (create teacher, reset password, deactivate).
+- **Done when**: a librarian can log in and create a teacher, the teacher can log in, and role-protected endpoints reject anonymous callers.
 
-- User entity and repository, BCrypt, JWT login, `JwtAuthFilter` (lets anonymous requests through), and `SecurityConfig`.
-- First librarian seeded from environment variables, change-password, and user admin (create teacher, reset password, deactivate).
-- **Done when:** a librarian can log in, create a teacher, and the teacher can log in. Role-protected endpoints reject anonymous callers.
+### Phase 2: Storage foundation
+- **Scope**: `FileStorageService` (temp file, checksum, atomic move, safe paths), `FileTypeDetector`, `DiskSpaceGuard`, shared `RangeFileResponder`.
+- **Done when**: tests show a file saves, duplicates are detected, path traversal is blocked, and a Range request returns 206 with the right bytes.
 
-<h2>Phase 2: Storage foundation</h2>
+### Phase 3: Categories and books
+- **Scope**: Category CRUD, then books: upload, edit, replace file, soft delete and restore, ownership rules, covers, search with filters, inline read and download.
+- **Done when**: a teacher uploads a PDF, an anonymous user finds it by search and opens it in the browser, and a teacher can't edit another teacher's book. First usable slice for the front-end team.
 
-- `FileStorageService` (temp file, checksum, atomic move, safe paths), `FileTypeDetector`, `DiskSpaceGuard`, and the shared `RangeFileResponder`.
-- **Done when:** tests show a file saves, duplicates are detected, path traversal is blocked, and a Range request returns 206 with the right bytes.
+### Phase 4: Archive and media processing
+- **Scope**: Archive upload, list and search, streaming with video seek, `MediaProcessor` for thumbnails, dimensions and duration (`ffmpeg` optional).
+- **Done when**: an image and an MP4 can be uploaded, thumbnails appear, the video seeks, and STAFF items are hidden from anonymous callers.
 
-<h2>Phase 3: Categories and books </h2>
+### Phase 5: Download counters and admin stats
+- **Scope**: `DownloadEvent` and `DownloadLog`, async counters for books and archive. `GET /api/admin/stats` was pulled forward from Phase 7 to verify the counters.
+- **Done when**: downloads increment counts without slowing streaming.
 
-- Category CRUD, then books: upload, edit, replace file, soft delete, ownership rules, covers, search with filters, inline read and download.
-- **Done when:** a teacher uploads a PDF, an anonymous user finds it by search and opens it in the browser, and a teacher can’t edit another teacher’s book. This is the first usable slice, so the front-end team can integrate against it.
+### Phase 6: Bulk import
+- **Scope**: CSV and folder import for books and archive on its own single-thread executor, with a per-row error report and a job status endpoint.
+- **Done when**: a folder of files plus a CSV imports correctly, duplicates are skipped, and bad rows are reported without stopping the job.
 
-<h2>Phase 4: Archive</h2>
+### Phase 7: Storage usage and health
+- **Scope**: `GET /api/admin/storage` usage breakdown; `GET /api/health` with degraded mode when the drive is unplugged. *(Admin stats were done in Phase 5; restore in Phases 3 and 4.)*
+- **Done when**: unplugging the drive in testing makes file requests return 503 while browsing keeps working.
 
-- Archive upload, list and search, streaming (video seek), and `MediaProcessor` for thumbnails, dimensions and duration (`ffmpeg` optional).
-- **Done when:** an image and an MP4 can be uploaded, thumbnails appear, the video seeks, and STAFF items are hidden from anonymous callers.
+### Phase 8: Hardening and handover prep
+- **Scope**: OpenAPI docs cleaned up for the front-end team, integration tests with Testcontainers, a security review (upload rules, throttling, JWT config, `Content-Disposition` encoding), and a scheduled sweep that deletes stale temp files.
+- **Done when**: tests pass on a clean checkout and the OpenAPI spec matches the real endpoints.
 
-<h2> Phase 5: Stats and events </h2>
+---
 
-- `DownloadEvent` and `DownloadLog`, async counters for books and archive.
-- **Done when:** downloads increment counts without slowing streaming.
+## 3. Server configuration (no app code)
 
-<h2> Phase 6: Bulk import </h2>
-
-- CSV and folder import for books and archive, running on its own single-thread executor, with a per-row error report and job status endpoint.
-- **Done when:** a folder of files plus a CSV imports correctly, duplicates are skipped, and bad rows are reported without stopping the job.
-
-<h2> Phase 7: Admin, storage and health </h2>
-
-- Admin stats, storage usage breakdown, `/api/health` with degraded mode (drive unplugged), and restore for soft-deleted items.
-- **Done when:** unplugging the drive in testing makes file requests return 503 while browsing keeps working.
-
-<h2> Phase 8: Hardening and handover prep </h2>
-
-- OpenAPI docs cleaned up for the front-end team, integration tests with Testcontainers, a security review (upload rules, throttling, JWT config), and a sweep job that deletes stale temp files.
-- **Done when:** tests pass on a clean checkout and the OpenAPI spec matches the real endpoints.
+| Item | Work |
+|---|---|
+| Mini PC OS | Linux install, static IP or DHCP reservation; install `ffmpeg`, Java 21 and MySQL 8. |
+| Router | DHCP reservation for the mini PC, client isolation **off** (otherwise phones can't reach the server), fixed address for the poster/QR code. |
+| Nginx | Proxy `/api` to Spring, serve the front-end, 2 GB upload limit, longer timeouts. |
+| External drive | Auto-mount by UUID, correct permissions, mount path matching `app.storage.root`. |
+| systemd | Spring Boot, MySQL and Nginx start on boot and restart on failure. |
+| Backups | Nightly `mysqldump` keeping 14 copies, plus a second copy of the archive on another disk. |
+| Restore test | Actually restore a backup once to prove it works. |

@@ -1,5 +1,7 @@
 # Backend Architecture: Perpustakaan Digital Lokal SMAN 11 Garut
 
+> **How** the backend is built. The API contract is in [backend-spec.md](backend-spec.md); the schedule is in [backend-phases.md](backend-phases.md).
+
 Style: **modular monolith**. One Spring Boot application, one deployable JAR, one MySQL database, files on the local disk. Organized by feature (package-by-feature) with a strict layering inside each feature.
 
 ## 1. Runtime view
@@ -36,18 +38,20 @@ Nothing leaves the LAN. MySQL listens on localhost only. Spring Boot listens on 
 Package root: `id.sch.sman11garut.library`
 
 ```
-config/      SecurityConfig, JwtAuthFilter, StorageProperties, AsyncConfig, OpenApiConfig
-common/      ApiError, GlobalExceptionHandler, PageResponse, exceptions
-auth/        AuthController, AuthService, JwtService
-user/        User, UserRepository, UserService, UserAdminController
-category/    Category, CategoryRepository, CategoryService, controllers
+config/      SecurityConfig, JwtAuthFilter, JwtProperties, StorageProperties, AsyncConfig
+common/      ApiError, AppException, GlobalExceptionHandler, PageResponse, Visibility
+auth/        AuthController, AuthService, JwtService, LoginThrottlingService, CustomUserDetailsService
+user/        User, UserRepository, UserService, UserAdminController, AdminUserSeeder
+category/    BookCategory, ArchiveCategory, repositories, CategoryService, controllers
+meta/        MetaController (filter dropdown values)
 storage/     FileStorageService, RangeFileResponder, DiskSpaceGuard, FileTypeDetector
-book/        Book, BookRepository, BookSpecifications, BookService, BookController
-archive/     ArchiveItem, ArchiveRepository, ArchiveSpecifications, ArchiveService, ArchiveController
-media/       MediaProcessor (thumbnails, ffprobe), listens for upload events
-stats/       DownloadLog, StatsService, AdminStatsController, listens for download events
-importer/    ImportJob, BulkImportService, ImportController
-health/      StorageHealthIndicator, HealthController
+book/        Book, BookRepository, BookSpecifications, BookService, BookController, BookAdminController
+archive/     ArchiveItem, ArchiveRepository, ArchiveSpecifications, ArchiveService, controllers
+media/       MediaProcessor (thumbnails, ffprobe), listens for ArchiveItemCreatedEvent
+stats/       DownloadLog, DownloadEventListener, StatsService, AdminStatsController
+importer/    ImportJob, ImportService, ImportRunner, ImportCsvReader, ImportRowMapper, ImportController
+health/      StorageHealthIndicator, HealthController            (planned, Phase 7)
+config/      OpenApiConfig                                        (planned, Phase 8)
 ```
 
 ### Layering inside each feature
@@ -64,7 +68,7 @@ health/      StorageHealthIndicator, HealthController
 ```
 controller -> service -> repository
 book, archive -> storage, category, user (via services)
-importer       -> book service, archive service (never their repositories)
+importer       -> book service, archive service, category service (never their repositories)
 media, stats   -> react to events only; nothing calls them directly
 storage        -> depends on nothing in the app (pure infrastructure)
 ```
@@ -79,10 +83,10 @@ Cross-feature calls go through **services**, never another feature's repository.
 2. Service checks the role, and for edits checks ownership.
 3. `DiskSpaceGuard` rejects the upload if free space is under the threshold.
 4. `FileStorageService` streams the upload to a temp file on the same volume, computes SHA-256, detects the real type (Tika), and rejects disallowed types.
-5. Duplicate check by checksum: if it exists, delete the temp file and return 409.
-6. Atomic move into the final path (`books/yyyy/mm/uuid.ext` or `archive/...`).
+5. Atomic move into the final path (`books/yyyy/mm/uuid.ext` or `archive/...`).
+6. Duplicate check by checksum, including soft-deleted rows (the DB unique key covers them too): if it exists, delete the stored file and return 409.
 7. Service saves the entity in a DB transaction. If this fails, the stored file is deleted (compensation).
-8. After commit, publish an `ItemCreatedEvent`. `MediaProcessor` handles it asynchronously (thumbnail, dimensions, duration) and updates the row. The upload response does not wait for it.
+8. Archive only: the service publishes an `ArchiveItemCreatedEvent`. `MediaProcessor` receives it **after commit** (`@TransactionalEventListener(AFTER_COMMIT)`) on the `media` executor, generates the thumbnail, dimensions and duration, and updates the row. The upload response does not wait for it.
 
 Files are written **before** the DB commit and cleaned up on failure, so there are never DB rows pointing to missing files.
 
@@ -100,7 +104,7 @@ Query parameters become a JPA `Specification` (category, grade, type, visibility
 
 ### 3.4 Bulk import
 
-Librarian triggers `/api/admin/import`. The service creates an `import_jobs` row and runs on a **single-thread executor**, reading the CSV and files from the import directory. Each row goes through the same `BookService`/`ArchiveService` create path as a normal upload, so validation, checksums and events behave identically. Errors are recorded per row and do not stop the job.
+Librarian triggers `/api/admin/import`. `ImportService` checks the CSV exists and no job is running, commits an `import_jobs` row, and hands it to `ImportRunner` on the **single-thread `import` executor**. The runner reads `{import-dir}/{books|archive}/*.csv` and, per row, calls `BookService.createBookFromStream` / `ArchiveService.createArchiveItemFromStream`: the same create path as a normal upload, so validation, checksums, compensation and events behave identically. There is no transaction around the loop; each row commits on its own. Duplicates count as skipped, other errors are recorded per row, and neither stops the job. Any job-level failure marks the job `FAILED`; jobs left `RUNNING` by a restart are marked `FAILED` at startup. Details: [phase-6-bulk-import.md](phase-6-bulk-import.md).
 
 ## 4. Cross-cutting concerns
 
@@ -114,7 +118,7 @@ Librarian triggers `/api/admin/import`. The service creates an `import_jobs` row
 
 **Transactions**: DB transactions only wrap DB work. File operations stay outside them, with explicit compensation.
 
-**Async work**: two small executors defined in `AsyncConfig`: `media` (2 threads: thumbnails) and `import` (1 thread). Events use Spring's in-process `ApplicationEventPublisher`. There is no message broker.
+**Async work**: three small executors defined in `AsyncConfig`: `mediaExecutor` (2–4 threads: thumbnails), `statsExecutor` (1–2 threads: download logs and counters) and `importExecutor` (1 thread: bulk import). Events use Spring's in-process `ApplicationEventPublisher`. There is no message broker.
 
 **Configuration**: `application.yml` plus `dev` and `prod` profiles. Secrets (`JWT_SECRET`, `ADMIN_PASSWORD`, DB password) come from environment variables via the systemd unit.
 
@@ -129,14 +133,15 @@ Librarian triggers `/api/admin/import`. The service creates an `import_jobs` row
 | Concern | Choice |
 |---|---|
 | Language/runtime | Java 21 (LTS) |
-| Framework | Spring Boot 3.x (Web, Data JPA, Security, Validation, Actuator) |
+| Framework | Spring Boot 4.1 (Web MVC, Data JPA, Security, Validation, Actuator) |
 | Database | MySQL 8 + Flyway |
-| Auth | Spring Security + JJWT |
+| Auth | Spring Security + JJWT 0.13 |
 | File type detection | Apache Tika |
 | Image thumbnails | Thumbnailator |
 | Video thumbnails/duration | ffmpeg / ffprobe via `ProcessBuilder` |
+| CSV import | Apache Commons CSV |
 | API docs | springdoc-openapi |
-| Build | Maven (or Gradle, pick one) |
+| Build | Maven (wrapper: `mvnw`) |
 | Tests | JUnit 5, Spring Boot Test, Testcontainers (MySQL) |
 
 ## 6. Deployment shape
