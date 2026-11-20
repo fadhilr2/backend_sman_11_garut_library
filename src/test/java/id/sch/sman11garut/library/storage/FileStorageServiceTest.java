@@ -41,7 +41,7 @@ class FileStorageServiceTest {
     @BeforeEach
     void setUp() throws Exception {
         StorageProperties properties = new StorageProperties(
-                tempDir, tempDir.resolve("import"), DataSize.ofMegabytes(1));
+                tempDir, tempDir.resolve("import"), DataSize.ofMegabytes(1), true);
         StorageDirectories directories = new StorageDirectories(properties);
         directories.ensure();
         service = new FileStorageService(
@@ -97,6 +97,35 @@ class FileStorageServiceTest {
 
         AppException missing = assertThrows(AppException.class, () -> service.loadAsResource(stored.relativePath()));
         assertEquals("NOT_FOUND", missing.getCode());
+    }
+
+    @Test
+    void reportsUnavailableInsteadOfNotFoundWhenTheDriveIsGone() throws Exception {
+        StoredFileInfo stored = service.storeFile(new ByteArrayInputStream(PDF), "modul.pdf", StorageCategory.BOOK);
+        // Simulate an unplugged drive: the file and the marker disappear.
+        Files.delete(tempDir.resolve(stored.relativePath()));
+        Files.delete(tempDir.resolve(StorageDirectories.MARKER));
+
+        AppException load = assertThrows(AppException.class, () -> service.loadAsResource(stored.relativePath()));
+        assertEquals(503, load.getStatus().value());
+        assertEquals("STORAGE_UNAVAILABLE", load.getCode());
+    }
+
+    @Test
+    void doesNotCreateAnythingOnAnUnmountedMountPoint() throws Exception {
+        Path mountPoint = tempDir.resolve("mnt");
+        Files.createDirectories(mountPoint);
+        StorageProperties prod = new StorageProperties(
+                mountPoint, mountPoint.resolve("import"), DataSize.ofMegabytes(1), false);
+        FileStorageService unmounted = new FileStorageService(
+                prod, new StorageDirectories(prod), new DiskSpaceGuard(prod), new FileTypeDetector());
+
+        AppException ex = assertThrows(AppException.class,
+                () -> unmounted.storeFile(new ByteArrayInputStream(PDF), "modul.pdf", StorageCategory.BOOK));
+        assertEquals("STORAGE_UNAVAILABLE", ex.getCode());
+        try (Stream<Path> entries = Files.list(mountPoint)) {
+            assertEquals(0, entries.count());
+        }
     }
 
     private void assertTempDirectoryEmpty() throws Exception {

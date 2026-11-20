@@ -5,6 +5,7 @@ import id.sch.sman11garut.library.category.BookCategory;
 import id.sch.sman11garut.library.category.CategoryService;
 import id.sch.sman11garut.library.common.AppException;
 import id.sch.sman11garut.library.common.PageResponse;
+import id.sch.sman11garut.library.common.StorageUsage;
 import id.sch.sman11garut.library.common.Visibility;
 import id.sch.sman11garut.library.stats.DownloadEvent;
 import id.sch.sman11garut.library.stats.ItemType;
@@ -390,6 +391,16 @@ public class BookService {
                 pageable
         );
         return PageResponse.from(page.map(BookSummaryDto::from));
+    }
+
+    /** Count and bytes of book files (active and in the trash), for the storage report. */
+    @Transactional(readOnly = true)
+    public StorageUsage storageUsage() {
+        Object[] active = bookRepository.sumActiveFileSize().get(0);
+        Object[] trash = bookRepository.sumDeletedFileSize().get(0);
+        return StorageUsage.EMPTY
+                .withActive(((Number) active[0]).longValue(), ((Number) active[1]).longValue())
+                .withTrash(((Number) trash[0]).longValue(), ((Number) trash[1]).longValue());
     }
 
     private void checkOwnership(Book book, UserPrincipal principal) {

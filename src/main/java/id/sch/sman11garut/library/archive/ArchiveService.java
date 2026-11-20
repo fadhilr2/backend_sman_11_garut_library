@@ -5,6 +5,7 @@ import id.sch.sman11garut.library.category.ArchiveCategory;
 import id.sch.sman11garut.library.category.ArchiveCategoryRepository;
 import id.sch.sman11garut.library.common.AppException;
 import id.sch.sman11garut.library.common.PageResponse;
+import id.sch.sman11garut.library.common.StorageUsage;
 import id.sch.sman11garut.library.common.Visibility;
 import id.sch.sman11garut.library.media.ArchiveItemCreatedEvent;
 import id.sch.sman11garut.library.stats.DownloadEvent;
@@ -22,6 +23,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.EnumMap;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -321,6 +324,24 @@ public class ArchiveService {
         Page<ArchiveItem> page = archiveRepository.findByUploadedByIdAndDeletedAtIsNullOrderByCreatedAtDesc(
                 principal.getId(), pageable);
         return PageResponse.from(page.map(ArchiveSummaryDto::from));
+    }
+
+    /** Count and bytes of archive files per media type (active and in the trash), for the storage report. */
+    @Transactional(readOnly = true)
+    public Map<MediaType, StorageUsage> storageUsageByMediaType() {
+        Map<MediaType, StorageUsage> usage = new EnumMap<>(MediaType.class);
+        for (MediaType type : MediaType.values()) {
+            usage.put(type, StorageUsage.EMPTY);
+        }
+        for (Object[] row : archiveRepository.sumActiveFileSizeByMediaType()) {
+            MediaType type = (MediaType) row[0];
+            usage.put(type, usage.get(type).withActive(((Number) row[1]).longValue(), ((Number) row[2]).longValue()));
+        }
+        for (Object[] row : archiveRepository.sumDeletedFileSizeByMediaType()) {
+            MediaType type = (MediaType) row[0];
+            usage.put(type, usage.get(type).withTrash(((Number) row[1]).longValue(), ((Number) row[2]).longValue()));
+        }
+        return usage;
     }
 
     private void checkOwnership(ArchiveItem item, UserPrincipal principal) {

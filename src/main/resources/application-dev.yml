@@ -16,6 +16,8 @@ app:
   storage:
     root: ./data/storage
     import-dir: ./data/import
+    # Dev creates the root and its .library-storage marker. Prod never does (see backend-spec §6).
+    auto-create-root: true
   jwt:
     # 256-bit dev secret for local testing
     secret: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970

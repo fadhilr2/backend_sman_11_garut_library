@@ -29,6 +29,14 @@ public interface BookRepository extends JpaRepository<Book, Long>, JpaSpecificat
     @Query("SELECT b.bookType, COUNT(b) FROM Book b WHERE b.deletedAt IS NULL GROUP BY b.bookType")
     List<Object[]> countGroupedByBookType();
 
+    /** One row: {count, total file size} of active books. */
+    @Query("SELECT COUNT(b), COALESCE(SUM(b.fileSize), 0) FROM Book b WHERE b.deletedAt IS NULL")
+    List<Object[]> sumActiveFileSize();
+
+    /** One row: {count, total file size} of soft-deleted books (still on disk). */
+    @Query("SELECT COUNT(b), COALESCE(SUM(b.fileSize), 0) FROM Book b WHERE b.deletedAt IS NOT NULL")
+    List<Object[]> sumDeletedFileSize();
+
     @Modifying
     @Query("UPDATE Book b SET b.downloadCount = b.downloadCount + 1 WHERE b.id = :id")
     void incrementDownloadCount(@Param("id") Long id);

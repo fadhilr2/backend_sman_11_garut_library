@@ -25,6 +25,14 @@ public interface ArchiveRepository extends JpaRepository<ArchiveItem, Long>, Jpa
     @Query("SELECT a.mediaType, COUNT(a) FROM ArchiveItem a WHERE a.deletedAt IS NULL GROUP BY a.mediaType")
     List<Object[]> countGroupedByMediaType();
 
+    /** Rows: {mediaType, count, total file size} of active items. */
+    @Query("SELECT a.mediaType, COUNT(a), COALESCE(SUM(a.fileSize), 0) FROM ArchiveItem a WHERE a.deletedAt IS NULL GROUP BY a.mediaType")
+    List<Object[]> sumActiveFileSizeByMediaType();
+
+    /** Rows: {mediaType, count, total file size} of soft-deleted items (still on disk). */
+    @Query("SELECT a.mediaType, COUNT(a), COALESCE(SUM(a.fileSize), 0) FROM ArchiveItem a WHERE a.deletedAt IS NOT NULL GROUP BY a.mediaType")
+    List<Object[]> sumDeletedFileSizeByMediaType();
+
     @Modifying
     @Query("UPDATE ArchiveItem a SET a.viewCount = a.viewCount + 1 WHERE a.id = :id")
     void incrementViewCount(@Param("id") Long id);

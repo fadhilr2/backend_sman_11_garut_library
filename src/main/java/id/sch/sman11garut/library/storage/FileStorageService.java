@@ -47,6 +47,7 @@ public class FileStorageService {
 
     public StoredFileInfo storeFile(InputStream inputStream, String originalFilename, StorageCategory category) {
         try {
+            // Throws STORAGE_UNAVAILABLE (and creates nothing) when the drive is not mounted.
             directories.ensure();
         } catch (IOException ex) {
             throw storageFailure("Could not prepare storage directories", ex);
@@ -131,6 +132,7 @@ public class FileStorageService {
     }
 
     public void deleteStoredFile(String relativePath) {
+        diskSpaceGuard.ensureMounted();
         Path path = resolveSafePath(relativePath);
         try {
             Files.deleteIfExists(path);
@@ -142,6 +144,8 @@ public class FileStorageService {
     public Resource loadAsResource(String relativePath) {
         Path path = resolveSafePath(relativePath);
         if (!Files.isRegularFile(path)) {
+            // Distinguish "drive unplugged" (503) from "this one file is missing" (404).
+            diskSpaceGuard.ensureMounted();
             throw AppException.notFound("Stored file not found");
         }
         return new FileSystemResource(path);

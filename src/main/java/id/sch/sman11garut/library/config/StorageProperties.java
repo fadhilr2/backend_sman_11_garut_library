@@ -5,9 +5,18 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.util.unit.DataSize;
 
+/**
+ * Storage settings ({@code app.storage.*}).
+ *
+ * @param autoCreateRoot when true (dev), the app creates the storage root and its
+ *     {@code .library-storage} marker itself. When false (prod), the root must already be
+ *     a mounted drive containing the marker; the app never creates it, so an unmounted
+ *     mount point is never filled by mistake.
+ */
 @ConfigurationProperties(prefix = "app.storage")
 public record StorageProperties(
         Path root,
         Path importDir,
-        @DefaultValue("5GB") DataSize minFreeSpace) {
+        @DefaultValue("5GB") DataSize minFreeSpace,
+        @DefaultValue("false") boolean autoCreateRoot) {
 }
