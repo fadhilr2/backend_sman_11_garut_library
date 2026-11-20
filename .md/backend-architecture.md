@@ -50,7 +50,7 @@ archive/     ArchiveItem, ArchiveRepository, ArchiveSpecifications, ArchiveServi
 media/       MediaProcessor (thumbnails, ffprobe), listens for ArchiveItemCreatedEvent
 stats/       DownloadLog, DownloadEventListener, StatsService, AdminStatsController
 importer/    ImportJob, ImportService, ImportRunner, ImportCsvReader, ImportRowMapper, ImportController
-health/      StorageHealthIndicator, HealthController            (planned, Phase 7)
+health/      HealthService, HealthController, StorageHealthIndicator, StorageUsageService, AdminStorageController
 config/      OpenApiConfig                                        (planned, Phase 8)
 ```
 
@@ -70,6 +70,7 @@ controller -> service -> repository
 book, archive -> storage, category, user (via services)
 importer       -> book service, archive service, category service (never their repositories)
 media, stats   -> react to events only; nothing calls them directly
+health         -> storage, book service, archive service (read-only reporting)
 storage        -> depends on nothing in the app (pure infrastructure)
 ```
 
@@ -122,7 +123,7 @@ Librarian triggers `/api/admin/import`. `ImportService` checks the CSV exists an
 
 **Configuration**: `application.yml` plus `dev` and `prod` profiles. Secrets (`JWT_SECRET`, `ADMIN_PASSWORD`, DB password) come from environment variables via the systemd unit.
 
-**Observability**: logs to a rotating file, Actuator exposing only `/health`, and a custom storage health indicator (drive mounted, writable, free space). The same data feeds `/api/health`.
+**Observability**: logs to a rotating file, Actuator exposing only `/health`, and a custom storage health indicator (drive mounted, writable, free space). The same data feeds `/api/health`. "Mounted" means the storage root contains a `.library-storage` marker file, so an empty mount point on the OS disk is never mistaken for the drive; in prod the app never creates the root or the marker itself. Details: [phase-7-storage-health.md](phase-7-storage-health.md).
 
 **API documentation**: springdoc-openapi generates the OpenAPI spec for the front-end team.
 

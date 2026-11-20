@@ -1,6 +1,6 @@
 # Phase 6: Bulk Import
 
-> **Status:** Done · **Roadmap:** [Phase 6](backend-phases.md#phase-6-bulk-import) · **Spec:** [Bulk import rules](backend-spec.md#55-bulk-import)
+> **Status:** Done · **Commit:** `e50862f` · **Roadmap:** [Phase 6](backend-phases.md#phase-6-bulk-import) · **Spec:** [Bulk import rules](backend-spec.md#55-bulk-import)
 
 ## 1. Summary
 

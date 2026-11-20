@@ -13,7 +13,7 @@
 | 4 | Archive and media processing | Done | [phase-4-archive.md](phase-4-archive.md) |
 | 5 | Download counters and admin stats | Done | [phase-5-downloads-stats.md](phase-5-downloads-stats.md) |
 | 6 | Bulk import | Done | [phase-6-bulk-import.md](phase-6-bulk-import.md) |
-| 7 | Storage usage and health | Planned | — |
+| 7 | Storage usage and health | Done | [phase-7-storage-health.md](phase-7-storage-health.md) |
 | 8 | Hardening and handover prep | Planned | — |
 
 ---
@@ -65,7 +65,7 @@
 | Mini PC OS | Linux install, static IP or DHCP reservation; install `ffmpeg`, Java 21 and MySQL 8. |
 | Router | DHCP reservation for the mini PC, client isolation **off** (otherwise phones can't reach the server), fixed address for the poster/QR code. |
 | Nginx | Proxy `/api` to Spring, serve the front-end, 2 GB upload limit, longer timeouts. |
-| External drive | Auto-mount by UUID, correct permissions, mount path matching `app.storage.root`. |
+| External drive | Auto-mount by UUID, correct permissions, mount path matching `app.storage.root`. After the first mount, create the marker once: `touch /mnt/library/files/.library-storage` (owned by the app user). Without it the app treats the drive as unplugged. |
 | systemd | Spring Boot, MySQL and Nginx start on boot and restart on failure. |
 | Backups | Nightly `mysqldump` keeping 14 copies, plus a second copy of the archive on another disk. |
 | Restore test | Actually restore a backup once to prove it works. |

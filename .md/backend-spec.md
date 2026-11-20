@@ -57,7 +57,7 @@
 |---|---|---|---|
 | GET | `/categories?type=BOOK\|ARCHIVE` | Category list (tree via `parentId` / `children`). Default `BOOK`. | 3 |
 | GET | `/meta/filters` | Grade levels, book types, media types, curricula for filter dropdowns. | 3 |
-| GET | `/health` | DB reachable + storage mounted and writable. *(Until then: `/actuator/health`.)* | 7 (planned) |
+| GET | `/health` | `{status, database, storage}`. `status`: `UP`, `DEGRADED` (DB up, storage `UNAVAILABLE` or `LOW_SPACE`) → `200`; `DOWN` (DB unreachable) → `503`. No byte counts. | 7 |
 
 ### 3.4 Auth
 | Method | Path | Notes | Phase |
@@ -89,7 +89,7 @@
 | POST | `/admin/import` | Body `{"target": "BOOK"\|"ARCHIVE"}`. Starts a bulk import from the server folder (see §5.5). `202 Accepted` + job. | 6 |
 | GET | `/admin/import/{jobId}` | Job progress and per-row error report. | 6 |
 | GET | `/admin/import` | 20 most recent import jobs. | 6 |
-| GET | `/admin/storage` | Disk used/free, plus breakdown: books vs archive images vs videos. | 7 (planned) |
+| GET | `/admin/storage` | Disk total/used/free, plus count and bytes for books and archive `IMAGE`/`VIDEO`/`DOCUMENT` (active and trash), thumbnails and temp files. Disk fields are `null` while the drive is unavailable. | 7 |
 
 ---
 
@@ -123,6 +123,7 @@ Validation errors add a `fields` object (`{"title": "Title is required"}`).
 | 409 | `IMPORT_ALREADY_RUNNING` | Another import job is RUNNING. |
 | 500 | `STORAGE_WRITE_FAILED`, `INTERNAL_ERROR` | Server-side failure. |
 | 503 | `STORAGE_FULL` | Free disk space under `app.storage.min-free-space`. |
+| 503 | `STORAGE_UNAVAILABLE` | Storage drive not mounted (no `.library-storage` marker) or not writable. File, upload and import requests only; browsing keeps working. |
 | 503 | `IMPORT_QUEUE_FULL` | Import executor queue full. |
 
 ---
@@ -173,6 +174,7 @@ app:
     root: /mnt/library/files        # 1 TB HDD mount (dev: ./data/storage)
     import-dir: /mnt/library/import # (dev: ./data/import)
     min-free-space: 5GB
+    auto-create-root: false         # dev: true (creates root + marker)
   jwt:
     secret: ${JWT_SECRET}
     expiry-hours: 8
@@ -181,6 +183,7 @@ spring:
   servlet.multipart.max-request-size: 2GB
   jpa.hibernate.ddl-auto: validate          # Flyway owns the schema
 ```
+- **Storage marker**: the storage root must contain a `.library-storage` file, or the drive counts as unplugged. With `auto-create-root: false` (prod) the app never creates the root or marker; create the marker once after mounting the drive.
 - **First admin**: if no LIBRARIAN exists at startup, one is created from `ADMIN_USERNAME` / `ADMIN_PASSWORD` (dev fallback `admin` / `admin123`).
 - **Nginx** must match the upload limit: `client_max_body_size 2g;` and raised `proxy_read_timeout` / `proxy_send_timeout` (e.g. 600 s).
 - **CORS**: not needed in production; the front-end is served by the same Nginx.
@@ -189,6 +192,6 @@ spring:
 
 ## 7. Operations
 
-- **Health / degraded mode** *(Phase 7)*: `/api/health` checks the DB and that the storage root is mounted and writable. If the HDD is unplugged, browsing still works and file endpoints return 503.
+- **Health / degraded mode**: `/api/health` checks the DB and that the storage root is mounted (marker present) and writable; `/actuator/health` has a matching `storage` component. If the HDD is unplugged, the app keeps running (also when started without it): browsing works, file and upload endpoints return `503 STORAGE_UNAVAILABLE`, covers and thumbnails show placeholders. Plugging the drive back in recovers without a restart.
 - **Backups**: nightly `mysqldump` (keep 14). Archive photos/videos can't be re-downloaded, so keep a second copy on another disk.
 - **Capacity**: 1080p video is roughly 0.5–1 GB per 10 minutes. `/api/admin/storage` shows usage before the disk fills.

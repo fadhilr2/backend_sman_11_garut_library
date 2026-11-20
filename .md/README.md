@@ -19,6 +19,7 @@ Phase docs:
 | 4 | [phase-4-archive.md](phase-4-archive.md) |
 | 5 | [phase-5-downloads-stats.md](phase-5-downloads-stats.md) |
 | 6 | [phase-6-bulk-import.md](phase-6-bulk-import.md) |
+| 7 | [phase-7-storage-health.md](phase-7-storage-health.md) |
 
 ---
 
