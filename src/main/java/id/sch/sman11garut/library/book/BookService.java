@@ -10,31 +10,26 @@ import id.sch.sman11garut.library.common.Visibility;
 import id.sch.sman11garut.library.stats.DownloadEvent;
 import id.sch.sman11garut.library.stats.ItemType;
 import id.sch.sman11garut.library.storage.FileStorageService;
-import id.sch.sman11garut.library.storage.RangeFileResponder;
+import id.sch.sman11garut.library.storage.ServedFile;
 import id.sch.sman11garut.library.storage.StorageCategory;
 import id.sch.sman11garut.library.storage.StoredFileInfo;
 import id.sch.sman11garut.library.user.Role;
 import id.sch.sman11garut.library.user.User;
 import id.sch.sman11garut.library.user.UserRepository;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.core.io.ByteArrayResource;
-import org.springframework.core.io.Resource;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
 @Service
@@ -53,7 +48,6 @@ public class BookService {
     private final CategoryService categoryService;
     private final UserRepository userRepository;
     private final FileStorageService fileStorageService;
-    private final RangeFileResponder rangeFileResponder;
     private final ApplicationEventPublisher eventPublisher;
 
     public BookService(
@@ -61,13 +55,11 @@ public class BookService {
             CategoryService categoryService,
             UserRepository userRepository,
             FileStorageService fileStorageService,
-            RangeFileResponder rangeFileResponder,
             ApplicationEventPublisher eventPublisher) {
         this.bookRepository = bookRepository;
         this.categoryService = categoryService;
         this.userRepository = userRepository;
         this.fileStorageService = fileStorageService;
-        this.rangeFileResponder = rangeFileResponder;
         this.eventPublisher = eventPublisher;
     }
 
@@ -111,69 +103,50 @@ public class BookService {
         return BookDetailDto.from(book);
     }
 
+    // The open* methods only look up and check the item. The controller streams the result
+    // after the transaction has ended, so a long download never holds a DB connection.
+
     @Transactional(readOnly = true)
-    public void streamBookFile(Long id, boolean isStaff, HttpServletRequest request, HttpServletResponse response) {
-        Book book = bookRepository.findByIdAndDeletedAtIsNull(id)
-                .orElseThrow(() -> AppException.notFound("Book not found with id: " + id));
-
-        if (book.getVisibility() == Visibility.STAFF && !isStaff) {
-            throw AppException.notFound("Book not found with id: " + id);
-        }
-
-        Resource resource = fileStorageService.loadAsResource(book.getStoredPath());
-        try {
-            rangeFileResponder.write(request, response, resource, book.getMimeType());
-        } catch (IOException ex) {
-            log.error("Streaming failed for book id {}: {}", id, ex.getMessage());
-        }
+    public ServedFile openFile(Long id, boolean isStaff) {
+        Book book = findVisibleBook(id, isStaff);
+        return new ServedFile(
+                fileStorageService.loadAsResource(book.getStoredPath()), book.getMimeType(), book.getOriginalName());
     }
 
+    /** Same as {@link #openFile}, and counts the download (asynchronously). */
     @Transactional(readOnly = true)
-    public void downloadBookFile(Long id, boolean isStaff, HttpServletRequest request, HttpServletResponse response) {
-        Book book = bookRepository.findByIdAndDeletedAtIsNull(id)
-                .orElseThrow(() -> AppException.notFound("Book not found with id: " + id));
-
-        if (book.getVisibility() == Visibility.STAFF && !isStaff) {
-            throw AppException.notFound("Book not found with id: " + id);
-        }
-
-        eventPublisher.publishEvent(new DownloadEvent(ItemType.BOOK, book.getId(), Instant.now()));
-
-        Resource resource = fileStorageService.loadAsResource(book.getStoredPath());
-        response.setHeader(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + book.getOriginalName() + "\"");
-
-        try {
-            rangeFileResponder.write(request, response, resource, book.getMimeType());
-        } catch (IOException ex) {
-            log.error("Download failed for book id {}: {}", id, ex.getMessage());
-        }
+    public ServedFile openDownload(Long id, boolean isStaff) {
+        ServedFile file = openFile(id, isStaff);
+        eventPublisher.publishEvent(new DownloadEvent(ItemType.BOOK, id, Instant.now()));
+        return file;
     }
 
+    /** The cover with its real type, or the SVG placeholder. STAFF books stay hidden (404) from anonymous callers. */
     @Transactional(readOnly = true)
-    public void getBookCover(Long id, HttpServletRequest request, HttpServletResponse response) {
-        Book book = bookRepository.findByIdAndDeletedAtIsNull(id)
-                .orElseThrow(() -> AppException.notFound("Book not found with id: " + id));
-
+    public ServedFile openCover(Long id, boolean isStaff) {
+        Book book = findVisibleBook(id, isStaff);
         if (book.getCoverPath() == null || book.getCoverPath().isBlank()) {
-            serveDefaultCover(response);
-            return;
+            return ServedFile.svg(DEFAULT_COVER_SVG);
         }
-
         try {
-            Resource resource = fileStorageService.loadAsResource(book.getCoverPath());
-            rangeFileResponder.write(request, response, resource, "image/jpeg");
-        } catch (Exception ex) {
-            serveDefaultCover(response);
+            return new ServedFile(
+                    fileStorageService.loadAsResource(book.getCoverPath()),
+                    ServedFile.imageTypeOf(book.getCoverPath()),
+                    null);
+        } catch (AppException ex) {
+            // Missing cover file or drive unplugged: a placeholder keeps the catalog browsable.
+            log.debug("Cover for book {} unavailable ({}), serving placeholder", id, ex.getCode());
+            return ServedFile.svg(DEFAULT_COVER_SVG);
         }
     }
 
-    private void serveDefaultCover(HttpServletResponse response) {
-        try {
-            response.setContentType("image/svg+xml");
-            response.setStatus(HttpServletResponse.SC_OK);
-            response.getOutputStream().write(DEFAULT_COVER_SVG.getBytes(StandardCharsets.UTF_8));
-        } catch (IOException ignored) {
+    private Book findVisibleBook(Long id, boolean isStaff) {
+        Book book = bookRepository.findByIdAndDeletedAtIsNull(id)
+                .orElseThrow(() -> AppException.notFound("Book not found with id: " + id));
+        if (book.getVisibility() == Visibility.STAFF && !isStaff) {
+            throw AppException.notFound("Book not found with id: " + id);
         }
+        return book;
     }
 
     @Transactional
@@ -344,6 +317,10 @@ public class BookService {
         }
 
         String oldPath = book.getStoredPath();
+        // Decided when the transaction ends: committed → the old file goes; rolled back (any
+        // failure below, or the commit itself) → the new file goes. The row never points at a
+        // deleted file, and no orphan is left behind.
+        cleanUpOnCompletion(oldPath, newStored.relativePath());
 
         book.setOriginalName(newStored.originalFilename());
         book.setStoredPath(newStored.relativePath());
@@ -352,11 +329,24 @@ public class BookService {
         book.setChecksumSha256(newStored.checksumSha256());
 
         Book saved = bookRepository.save(book);
-
-        // Delete old file
-        fileStorageService.deleteStoredFile(oldPath);
-
         return BookDetailDto.from(saved);
+    }
+
+    private void cleanUpOnCompletion(String deleteIfCommitted, String deleteIfRolledBack) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                deleteQuietly(status == STATUS_COMMITTED ? deleteIfCommitted : deleteIfRolledBack);
+            }
+        });
+    }
+
+    private void deleteQuietly(String relativePath) {
+        try {
+            fileStorageService.deleteStoredFile(relativePath);
+        } catch (RuntimeException ex) {
+            log.warn("Could not delete stored file {}: {}", relativePath, ex.getMessage());
+        }
     }
 
     @Transactional

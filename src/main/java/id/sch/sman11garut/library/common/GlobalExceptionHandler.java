@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.*;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.web.ErrorResponse;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -52,6 +53,11 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             Exception ex, Object body, HttpHeaders headers,
             HttpStatusCode statusCode, WebRequest request) {
         String code = HttpStatus.valueOf(statusCode.value()).name();
+        // Most Spring MVC handlers pass body == null; the reason (e.g. "Required part 'file'
+        // is not present.") is on the exception itself.
+        if (body == null && ex instanceof ErrorResponse errorResponse) {
+            body = errorResponse.getBody();
+        }
         String message = (body instanceof ProblemDetail pd && pd.getDetail() != null)
                 ? pd.getDetail() : "Request failed";
         return ResponseEntity.status(statusCode)

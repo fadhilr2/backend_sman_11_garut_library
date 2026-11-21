@@ -21,7 +21,7 @@ class StorageDirectoriesTest {
     Path tempDir;
 
     private static StorageProperties properties(Path root, boolean autoCreateRoot) {
-        return new StorageProperties(root, root.resolve("import"), DataSize.ofMegabytes(1), autoCreateRoot);
+        return new StorageProperties(root, root.resolve("import"), DataSize.ofMegabytes(1), autoCreateRoot, java.time.Duration.ofHours(24));
     }
 
     @Test

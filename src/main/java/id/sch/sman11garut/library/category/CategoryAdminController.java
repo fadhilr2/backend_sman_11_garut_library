@@ -1,5 +1,7 @@
 package id.sch.sman11garut.library.category;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.net.URI;
 import org.springframework.http.ResponseEntity;
@@ -14,6 +16,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@Tag(name = "Admin: Categories", description = "Librarian only")
 @RequestMapping("/api/admin/categories")
 @PreAuthorize("hasRole('LIBRARIAN')")
 public class CategoryAdminController {
@@ -24,12 +27,14 @@ public class CategoryAdminController {
         this.categoryService = categoryService;
     }
 
+    @Operation(summary = "Create a category")
     @PostMapping
     public ResponseEntity<CategoryDto> createCategory(@Valid @RequestBody CreateCategoryRequest request) {
         CategoryDto created = categoryService.createCategory(request);
         return ResponseEntity.created(URI.create("/api/categories/" + created.id())).body(created);
     }
 
+    @Operation(summary = "Rename or move a category")
     @PutMapping("/{id}")
     public ResponseEntity<CategoryDto> updateCategory(
             @PathVariable Integer id,
@@ -38,6 +43,7 @@ public class CategoryAdminController {
         return ResponseEntity.ok(categoryService.updateCategory(id, request, type));
     }
 
+    @Operation(summary = "Delete a category (blocked while in use)")
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteCategory(
             @PathVariable Integer id,

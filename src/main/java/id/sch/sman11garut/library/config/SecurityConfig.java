@@ -56,6 +56,9 @@ public class SecurityConfig {
         http
             .csrf(csrf -> csrf.disable())
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            // The front-end (same origin via Nginx) may show PDFs from /api/books/{id}/file in an
+            // <iframe>; the default DENY would block that. Other sites still can't frame us.
+            .headers(headers -> headers.frameOptions(frame -> frame.sameOrigin()))
             .exceptionHandling(ex -> ex.authenticationEntryPoint(authenticationEntryPoint()))
             .authorizeHttpRequests(auth -> auth
                 // Public auth & health endpoints

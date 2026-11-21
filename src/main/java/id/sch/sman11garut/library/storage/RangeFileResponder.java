@@ -6,18 +6,56 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.StandardOpenOption;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.io.Resource;
+import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 
 @Component
 public class RangeFileResponder {
 
+    private static final Logger log = LoggerFactory.getLogger(RangeFileResponder.class);
+
     private static final int BUFFER_SIZE = 8192;
+
+    /**
+     * Streams a looked-up file inline. Call this outside any transaction. A client that
+     * disconnects mid-stream (closed tab, seek in a video) is normal and only logged at debug.
+     */
+    public void serve(HttpServletRequest request, HttpServletResponse response, ServedFile file) {
+        try {
+            write(request, response, file.resource(), file.contentType());
+        } catch (IOException ex) {
+            log.debug("Streaming stopped: {}", ex.getMessage());
+        }
+    }
+
+    /**
+     * Like {@link #serve} but as a download. The original name is encoded per RFC 6266 /
+     * RFC 5987, so quotes, semicolons and non-ASCII characters can't break the header.
+     */
+    public void serveAttachment(HttpServletRequest request, HttpServletResponse response, ServedFile file) {
+        String name = file.filename() == null || file.filename().isBlank() ? "file" : file.filename();
+        response.setHeader(HttpHeaders.CONTENT_DISPOSITION,
+                ContentDisposition.attachment().filename(name, StandardCharsets.UTF_8).build().toString());
+        serve(request, response, file);
+    }
 
     public void write(HttpServletRequest request, HttpServletResponse response, Resource resource, String contentType)
             throws IOException {
+        if (!resource.isFile()) {
+            // In-memory body (e.g. an SVG placeholder): no ranges, no file metadata.
+            byte[] body = resource.getContentAsByteArray();
+            response.setStatus(HttpServletResponse.SC_OK);
+            response.setContentType(contentType);
+            response.setContentLength(body.length);
+            response.getOutputStream().write(body);
+            return;
+        }
         if (!resource.exists() || !resource.isReadable()) {
             response.setStatus(HttpServletResponse.SC_NOT_FOUND);
             return;
@@ -103,10 +141,11 @@ public class RangeFileResponder {
         } catch (NumberFormatException ex) {
             return null;
         }
-        if (start < 0 || end < start || start >= total || end >= total) {
+        if (start < 0 || end < start || start >= total) {
             return null;
         }
-        return new ByteRange(start, end);
+        // RFC 9110: an end past the last byte means "to the end of the file", not an error.
+        return new ByteRange(start, Math.min(end, total - 1));
     }
 
     private static void copy(Resource resource, long start, long length, OutputStream output) throws IOException {

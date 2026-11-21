@@ -20,7 +20,7 @@ class DiskSpaceGuardTest {
     Path tempDir;
 
     private static StorageProperties properties(Path root, DataSize minFree) {
-        return new StorageProperties(root, root.resolve("import"), minFree, false);
+        return new StorageProperties(root, root.resolve("import"), minFree, false, java.time.Duration.ofHours(24));
     }
 
     private void mark() throws Exception {

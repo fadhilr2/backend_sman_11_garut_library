@@ -41,7 +41,7 @@ class FileStorageServiceTest {
     @BeforeEach
     void setUp() throws Exception {
         StorageProperties properties = new StorageProperties(
-                tempDir, tempDir.resolve("import"), DataSize.ofMegabytes(1), true);
+                tempDir, tempDir.resolve("import"), DataSize.ofMegabytes(1), true, java.time.Duration.ofHours(24));
         StorageDirectories directories = new StorageDirectories(properties);
         directories.ensure();
         service = new FileStorageService(
@@ -116,7 +116,7 @@ class FileStorageServiceTest {
         Path mountPoint = tempDir.resolve("mnt");
         Files.createDirectories(mountPoint);
         StorageProperties prod = new StorageProperties(
-                mountPoint, mountPoint.resolve("import"), DataSize.ofMegabytes(1), false);
+                mountPoint, mountPoint.resolve("import"), DataSize.ofMegabytes(1), false, java.time.Duration.ofHours(24));
         FileStorageService unmounted = new FileStorageService(
                 prod, new StorageDirectories(prod), new DiskSpaceGuard(prod), new FileTypeDetector());
 

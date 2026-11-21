@@ -11,29 +11,24 @@ import id.sch.sman11garut.library.media.ArchiveItemCreatedEvent;
 import id.sch.sman11garut.library.stats.DownloadEvent;
 import id.sch.sman11garut.library.stats.ItemType;
 import id.sch.sman11garut.library.storage.FileStorageService;
-import id.sch.sman11garut.library.storage.RangeFileResponder;
+import id.sch.sman11garut.library.storage.ServedFile;
 import id.sch.sman11garut.library.storage.StorageCategory;
 import id.sch.sman11garut.library.storage.StoredFileInfo;
 import id.sch.sman11garut.library.user.Role;
 import id.sch.sman11garut.library.user.User;
 import id.sch.sman11garut.library.user.UserRepository;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.EnumMap;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.core.io.Resource;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
-import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -68,7 +63,6 @@ public class ArchiveService {
     private final ArchiveCategoryRepository archiveCategoryRepository;
     private final UserRepository userRepository;
     private final FileStorageService fileStorageService;
-    private final RangeFileResponder rangeFileResponder;
     private final ApplicationEventPublisher eventPublisher;
 
     public ArchiveService(
@@ -76,13 +70,11 @@ public class ArchiveService {
             ArchiveCategoryRepository archiveCategoryRepository,
             UserRepository userRepository,
             FileStorageService fileStorageService,
-            RangeFileResponder rangeFileResponder,
             ApplicationEventPublisher eventPublisher) {
         this.archiveRepository = archiveRepository;
         this.archiveCategoryRepository = archiveCategoryRepository;
         this.userRepository = userRepository;
         this.fileStorageService = fileStorageService;
-        this.rangeFileResponder = rangeFileResponder;
         this.eventPublisher = eventPublisher;
     }
 
@@ -129,60 +121,52 @@ public class ArchiveService {
         return ArchiveDetailDto.from(item);
     }
 
+    // The open* methods only look up and check the item. The controller streams the result
+    // after the transaction has ended, so a long video never holds a DB connection.
+
     @Transactional(readOnly = true)
-    public void streamArchiveFile(Long id, boolean isStaff, HttpServletRequest request, HttpServletResponse response) {
-        ArchiveItem item = archiveRepository.findByIdAndDeletedAtIsNull(id)
-                .orElseThrow(() -> AppException.notFound("Archive item not found with id: " + id));
-
-        if (item.getVisibility() == Visibility.STAFF && !isStaff) {
-            throw AppException.notFound("Archive item not found with id: " + id);
-        }
-
-        Resource resource = fileStorageService.loadAsResource(item.getStoredPath());
-        try {
-            rangeFileResponder.write(request, response, resource, item.getMimeType());
-        } catch (IOException ex) {
-            log.error("Streaming failed for archive item id {}: {}", id, ex.getMessage());
-        }
+    public ServedFile openFile(Long id, boolean isStaff) {
+        ArchiveItem item = findVisibleItem(id, isStaff);
+        return new ServedFile(
+                fileStorageService.loadAsResource(item.getStoredPath()), item.getMimeType(), item.getOriginalName());
     }
 
+    /** Same as {@link #openFile}, and counts the download (asynchronously). */
     @Transactional(readOnly = true)
-    public void downloadArchiveFile(Long id, boolean isStaff, HttpServletRequest request, HttpServletResponse response) {
-        ArchiveItem item = archiveRepository.findByIdAndDeletedAtIsNull(id)
-                .orElseThrow(() -> AppException.notFound("Archive item not found with id: " + id));
-
-        if (item.getVisibility() == Visibility.STAFF && !isStaff) {
-            throw AppException.notFound("Archive item not found with id: " + id);
-        }
-
-        eventPublisher.publishEvent(new DownloadEvent(ItemType.ARCHIVE, item.getId(), Instant.now()));
-
-        Resource resource = fileStorageService.loadAsResource(item.getStoredPath());
-        response.setHeader(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + item.getOriginalName() + "\"");
-
-        try {
-            rangeFileResponder.write(request, response, resource, item.getMimeType());
-        } catch (IOException ex) {
-            log.error("Download failed for archive item id {}: {}", id, ex.getMessage());
-        }
+    public ServedFile openDownload(Long id, boolean isStaff) {
+        ServedFile file = openFile(id, isStaff);
+        eventPublisher.publishEvent(new DownloadEvent(ItemType.ARCHIVE, id, Instant.now()));
+        return file;
     }
 
+    /** The generated thumbnail, or a placeholder per media type. STAFF items stay hidden (404) from anonymous callers. */
     @Transactional(readOnly = true)
-    public void getArchiveThumbnail(Long id, HttpServletRequest request, HttpServletResponse response) {
-        ArchiveItem item = archiveRepository.findByIdAndDeletedAtIsNull(id)
-                .orElseThrow(() -> AppException.notFound("Archive item not found with id: " + id));
-
+    public ServedFile openThumbnail(Long id, boolean isStaff) {
+        ArchiveItem item = findVisibleItem(id, isStaff);
         if (item.getThumbnailPath() != null && !item.getThumbnailPath().isBlank()) {
             try {
-                Resource resource = fileStorageService.loadAsResource(item.getThumbnailPath());
-                rangeFileResponder.write(request, response, resource, "image/jpeg");
-                return;
-            } catch (Exception ex) {
-                log.warn("Could not serve thumbnail for archive item {}, falling back to placeholder", id);
+                return new ServedFile(
+                        fileStorageService.loadAsResource(item.getThumbnailPath()),
+                        ServedFile.imageTypeOf(item.getThumbnailPath()),
+                        null);
+            } catch (AppException ex) {
+                log.debug("Thumbnail for archive item {} unavailable ({}), serving placeholder", id, ex.getCode());
             }
         }
+        return ServedFile.svg(switch (item.getMediaType()) {
+            case IMAGE -> SVG_IMAGE;
+            case VIDEO -> SVG_VIDEO;
+            default -> SVG_DOCUMENT;
+        });
+    }
 
-        serveDefaultThumbnail(item.getMediaType(), response);
+    private ArchiveItem findVisibleItem(Long id, boolean isStaff) {
+        ArchiveItem item = archiveRepository.findByIdAndDeletedAtIsNull(id)
+                .orElseThrow(() -> AppException.notFound("Archive item not found with id: " + id));
+        if (item.getVisibility() == Visibility.STAFF && !isStaff) {
+            throw AppException.notFound("Archive item not found with id: " + id);
+        }
+        return item;
     }
 
     @Transactional
@@ -376,19 +360,5 @@ public class ArchiveService {
             default -> Sort.by(Sort.Direction.DESC, "createdAt");
         };
         return PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), sort);
-    }
-
-    private void serveDefaultThumbnail(MediaType mediaType, HttpServletResponse response) {
-        try {
-            response.setContentType("image/svg+xml");
-            response.setStatus(HttpServletResponse.SC_OK);
-            String svg = switch (mediaType) {
-                case IMAGE -> SVG_IMAGE;
-                case VIDEO -> SVG_VIDEO;
-                default -> SVG_DOCUMENT;
-            };
-            response.getOutputStream().write(svg.getBytes(StandardCharsets.UTF_8));
-        } catch (IOException ignored) {
-        }
     }
 }

@@ -22,6 +22,13 @@ management:
     health:
       show-details: never
 
+# API docs are for the front-end team during development; not served in production.
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
 logging:
   file:
     name: /var/log/sman11-library/app.log

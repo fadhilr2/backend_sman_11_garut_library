@@ -3,6 +3,7 @@ package id.sch.sman11garut.library.storage;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -75,5 +76,46 @@ class RangeFileResponderTest {
         assertEquals(416, response.getStatus());
         assertEquals("bytes */2048", response.getHeader(HttpHeaders.CONTENT_RANGE));
         assertEquals(0, response.getContentAsByteArray().length);
+    }
+
+    @Test
+    void clampsARangeEndPastTheLastByte() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader(HttpHeaders.RANGE, "bytes=1024-999999");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        responder.write(request, response, new FileSystemResource(file), "application/octet-stream");
+
+        assertEquals(206, response.getStatus());
+        assertEquals("bytes 1024-2047/2048", response.getHeader(HttpHeaders.CONTENT_RANGE));
+        assertArrayEquals(Arrays.copyOfRange(data, 1024, 2048), response.getContentAsByteArray());
+    }
+
+    @Test
+    void encodesNonAsciiAndQuotedNamesInContentDisposition() {
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        ServedFile served = new ServedFile(new FileSystemResource(file), "application/pdf", "Matematika – \"Kelas X\";.pdf");
+
+        responder.serveAttachment(new MockHttpServletRequest(), response, served);
+
+        String header = response.getHeader(HttpHeaders.CONTENT_DISPOSITION);
+        assertNotNull(header);
+        assertTrue(header.startsWith("attachment;"), header);
+        // RFC 5987: the real name travels percent-encoded as UTF-8.
+        assertTrue(header.contains("filename*=UTF-8''Matematika%20%E2%80%93%20%22Kelas%20X%22%3B.pdf"), header);
+        assertEquals(200, response.getStatus());
+    }
+
+    @Test
+    void servesAnInMemoryPlaceholderWithoutRanges() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader(HttpHeaders.RANGE, "bytes=0-10");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        responder.serve(request, response, ServedFile.svg("<svg/>"));
+
+        assertEquals(200, response.getStatus());
+        assertEquals("image/svg+xml", response.getContentType());
+        assertEquals("<svg/>", response.getContentAsString());
     }
 }

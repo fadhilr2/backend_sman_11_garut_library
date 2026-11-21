@@ -15,6 +15,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final LoginThrottlingService throttlingService;
+    private final String dummyHash;
 
     public AuthService(
             UserRepository userRepository,
@@ -25,6 +26,8 @@ public class AuthService {
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.throttlingService = throttlingService;
+        // Same encoder and cost as real hashes, so both paths take the same time.
+        this.dummyHash = passwordEncoder.encode("timing-equalizer-not-a-real-password");
     }
 
     public LoginResponse login(LoginRequest request) {
@@ -38,7 +41,12 @@ public class AuthService {
         User user = userRepository.findByUsername(request.username())
                 .orElse(null);
 
-        if (user == null || !user.isActive() || !passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+        // Always run one BCrypt check, also for unknown usernames, so the response time
+        // doesn't reveal which usernames exist.
+        String hash = user != null ? user.getPasswordHash() : dummyHash;
+        boolean passwordMatches = passwordEncoder.matches(request.password(), hash);
+
+        if (user == null || !user.isActive() || !passwordMatches) {
             throttlingService.recordFailedAttempt(request.username());
             throw AppException.badRequest("INVALID_CREDENTIALS", "Invalid username or password");
         }

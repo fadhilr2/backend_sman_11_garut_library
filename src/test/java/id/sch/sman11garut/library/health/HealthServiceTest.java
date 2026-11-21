@@ -26,7 +26,7 @@ class HealthServiceTest {
         if (mounted) {
             Files.createFile(tempDir.resolve(StorageDirectories.MARKER));
         }
-        return new DiskSpaceGuard(new StorageProperties(tempDir, tempDir.resolve("import"), minFree, false));
+        return new DiskSpaceGuard(new StorageProperties(tempDir, tempDir.resolve("import"), minFree, false, java.time.Duration.ofHours(24)));
     }
 
     private static DataSource database(boolean up) throws Exception {
