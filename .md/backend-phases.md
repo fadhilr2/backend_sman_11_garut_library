@@ -14,7 +14,7 @@
 | 5 | Download counters and admin stats | Done | [phase-5-downloads-stats.md](phase-5-downloads-stats.md) |
 | 6 | Bulk import | Done | [phase-6-bulk-import.md](phase-6-bulk-import.md) |
 | 7 | Storage usage and health | Done | [phase-7-storage-health.md](phase-7-storage-health.md) |
-| 8 | Hardening and handover prep | Planned | — |
+| 8 | Hardening and handover prep | Done | [phase-8-hardening.md](phase-8-hardening.md) |
 
 ---
 
@@ -55,6 +55,7 @@
 ### Phase 8: Hardening and handover prep
 - **Scope**: OpenAPI docs cleaned up for the front-end team, integration tests with Testcontainers, a security review (upload rules, throttling, JWT config, `Content-Disposition` encoding), and a scheduled sweep that deletes stale temp files.
 - **Done when**: tests pass on a clean checkout and the OpenAPI spec matches the real endpoints.
+- **Note**: the integration tests need Docker Desktop on the developer's machine (Testcontainers starts a throwaway MySQL 8); without it they are skipped. Not needed on the server.
 
 ---
 

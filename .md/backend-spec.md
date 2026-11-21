@@ -41,7 +41,7 @@
 | GET | `/books/{id}` | Metadata. | 3 |
 | GET | `/books/{id}/file` | Inline stream (in-browser reader). Supports HTTP `Range`. | 3 |
 | GET | `/books/{id}/download` | Same file as attachment. Logs the download and increments `downloadCount` (async). | 3, 5 |
-| GET | `/books/{id}/cover` | Cover image, or an SVG placeholder. | 3 |
+| GET | `/books/{id}/cover` | Cover image (`image/jpeg` or `image/png`), or an SVG placeholder. A `STAFF` book's cover is `404` for anonymous callers. | 3, 8 |
 
 ### 3.2 Public: Archive
 | Method | Path | Notes | Phase |
@@ -50,7 +50,7 @@
 | GET | `/archive/{id}` | Metadata incl. width, height, duration, event date. | 4 |
 | GET | `/archive/{id}/file` | Inline stream. **Range support is required** so videos can play and seek. | 4 |
 | GET | `/archive/{id}/download` | Attachment. Logged and increments `viewCount` (async). | 4, 5 |
-| GET | `/archive/{id}/thumbnail` | Generated thumbnail (image or video poster frame), or an SVG placeholder per media type. | 4 |
+| GET | `/archive/{id}/thumbnail` | Generated thumbnail (image or video poster frame), or an SVG placeholder per media type. A `STAFF` item's thumbnail is `404` for anonymous callers. | 4, 8 |
 
 ### 3.3 Public: Shared
 | Method | Path | Notes | Phase |
@@ -99,7 +99,9 @@ Every error uses the same body:
 ```json
 { "status": 409, "code": "DUPLICATE_FILE", "message": "A book with the same file content already exists (it may be in the trash)" }
 ```
-Validation errors add a `fields` object (`{"title": "Title is required"}`).
+Validation errors add a `fieldErrors` object (`{"title": "Title is required"}`). Errors raised by Spring while reading the request (missing multipart part, unreadable JSON, wrong method) use the HTTP status name as `code` (e.g. `BAD_REQUEST`) and Spring's reason as `message` (e.g. `Required part 'file' is not present.`).
+
+The generated OpenAPI document (dev: `/swagger-ui.html`, `/v3/api-docs`) lists every endpoint below with these error responses; a test keeps it equal to this section.
 
 | Status | Code | When |
 |---|---|---|
@@ -147,8 +149,10 @@ Validation errors add a `fields` object (`{"title": "Title is required"}`).
 - Type is sniffed from content (Apache Tika). Executables and extension/content mismatches are rejected.
 
 ### 5.4 Streaming, thumbnails, search
-- **Range**: single range, `206 Partial Content`, `Accept-Ranges`, `ETag`, `Last-Modified`; invalid range → `416`. No transcoding: videos the browser can't decode are still downloadable.
-- **Thumbnails** (archive, async): images → ~400 px JPEG + width/height; videos → frame at 1 s + duration/width/height via `ffmpeg`/`ffprobe` if installed, otherwise null fields and a placeholder.
+- **Range**: single range, `206 Partial Content`, `Accept-Ranges`, `ETag`, `Last-Modified`; a range end past the file end is clamped to the last byte; a start past the end → `416`. No transcoding: videos the browser can't decode are still downloadable.
+- **Downloads**: `Content-Disposition: attachment` with the original name encoded per RFC 6266 / RFC 5987 (`filename*=UTF-8''...`), so non-ASCII names such as `Matematika – Kelas X.pdf` survive.
+- **Framing**: responses carry `X-Frame-Options: SAMEORIGIN`; the front-end (same origin) may show `/file` in an `<iframe>`, other sites may not.
+- **Thumbnails** (archive, async): images → ~400 px JPEG + width/height (images over 50 megapixels: width/height only, placeholder thumbnail); videos → frame at 1 s + duration/width/height via `ffmpeg`/`ffprobe` if installed (60 s limit per run), otherwise null fields and a placeholder.
 - **Search**: MySQL FULLTEXT on `title, author, description` (books) and `title, description` (archive) for queries of 3+ characters; `LIKE` for shorter ones. Results are paged.
 
 ### 5.5 Bulk import
@@ -175,6 +179,7 @@ app:
     import-dir: /mnt/library/import # (dev: ./data/import)
     min-free-space: 5GB
     auto-create-root: false         # dev: true (creates root + marker)
+    temp-max-age: 24h               # hourly sweep deletes older files in <root>/temp
   jwt:
     secret: ${JWT_SECRET}
     expiry-hours: 8
@@ -187,11 +192,13 @@ spring:
 - **First admin**: if no LIBRARIAN exists at startup, one is created from `ADMIN_USERNAME` / `ADMIN_PASSWORD` (dev fallback `admin` / `admin123`).
 - **Nginx** must match the upload limit: `client_max_body_size 2g;` and raised `proxy_read_timeout` / `proxy_send_timeout` (e.g. 600 s).
 - **CORS**: not needed in production; the front-end is served by the same Nginx.
+- **API docs**: `/swagger-ui.html` and `/v3/api-docs` in dev only; the prod profile disables them (`springdoc.api-docs.enabled: false`).
 
 ---
 
 ## 7. Operations
 
 - **Health / degraded mode**: `/api/health` checks the DB and that the storage root is mounted (marker present) and writable; `/actuator/health` has a matching `storage` component. If the HDD is unplugged, the app keeps running (also when started without it): browsing works, file and upload endpoints return `503 STORAGE_UNAVAILABLE`, covers and thumbnails show placeholders. Plugging the drive back in recovers without a restart.
+- **Temp files**: uploads interrupted by a crash or power loss leave files in `<root>/temp`; an hourly job deletes those older than `temp-max-age` (skipped while the drive is unplugged).
 - **Backups**: nightly `mysqldump` (keep 14). Archive photos/videos can't be re-downloaded, so keep a second copy on another disk.
 - **Capacity**: 1080p video is roughly 0.5–1 GB per 10 minutes. `/api/admin/storage` shows usage before the disk fills.

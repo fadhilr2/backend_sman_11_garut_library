@@ -20,6 +20,7 @@ Phase docs:
 | 5 | [phase-5-downloads-stats.md](phase-5-downloads-stats.md) |
 | 6 | [phase-6-bulk-import.md](phase-6-bulk-import.md) |
 | 7 | [phase-7-storage-health.md](phase-7-storage-health.md) |
+| 8 | [phase-8-hardening.md](phase-8-hardening.md) |
 
 ---
 

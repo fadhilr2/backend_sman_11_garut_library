@@ -38,20 +38,19 @@ Nothing leaves the LAN. MySQL listens on localhost only. Spring Boot listens on 
 Package root: `id.sch.sman11garut.library`
 
 ```
-config/      SecurityConfig, JwtAuthFilter, JwtProperties, StorageProperties, AsyncConfig
+config/      SecurityConfig, JwtAuthFilter, JwtProperties, StorageProperties, AsyncConfig, OpenApiConfig
 common/      ApiError, AppException, GlobalExceptionHandler, PageResponse, Visibility
 auth/        AuthController, AuthService, JwtService, LoginThrottlingService, CustomUserDetailsService
 user/        User, UserRepository, UserService, UserAdminController, AdminUserSeeder
 category/    BookCategory, ArchiveCategory, repositories, CategoryService, controllers
 meta/        MetaController (filter dropdown values)
-storage/     FileStorageService, RangeFileResponder, DiskSpaceGuard, FileTypeDetector
+storage/     FileStorageService, RangeFileResponder, DiskSpaceGuard, FileTypeDetector, TempFileSweeper
 book/        Book, BookRepository, BookSpecifications, BookService, BookController, BookAdminController
 archive/     ArchiveItem, ArchiveRepository, ArchiveSpecifications, ArchiveService, controllers
 media/       MediaProcessor (thumbnails, ffprobe), listens for ArchiveItemCreatedEvent
 stats/       DownloadLog, DownloadEventListener, StatsService, AdminStatsController
 importer/    ImportJob, ImportService, ImportRunner, ImportCsvReader, ImportRowMapper, ImportController
 health/      HealthService, HealthController, StorageHealthIndicator, StorageUsageService, AdminStorageController
-config/      OpenApiConfig                                        (planned, Phase 8)
 ```
 
 ### Layering inside each feature
@@ -94,10 +93,10 @@ Files are written **before** the DB commit and cleaned up on failure, so there a
 ### 3.2 View / stream / download
 
 1. Controller receives the request (optionally with a JWT).
-2. Service loads metadata and applies the visibility rule: `STAFF` items return 404 to anonymous callers.
+2. Service (`openFile` / `openDownload` / `openCover` / `openThumbnail`, a short read-only transaction) loads metadata and applies the visibility rule: `STAFF` items, including their covers and thumbnails, return 404 to anonymous callers. It returns a `ServedFile` (resource, content type, original name).
 3. `FileStorageService` resolves the stored path safely (no path traversal; must stay under the storage root).
-4. `RangeFileResponder` answers `200` or `206 Partial Content` with `Accept-Ranges`, `Content-Type`, and `ETag`/`Last-Modified`.
-5. For `/download` only: publish a `DownloadEvent`. `stats` handles it asynchronously (insert log row, increment the counter), so streaming never blocks on stats.
+4. For `/download` only: publish a `DownloadEvent`. `stats` handles it asynchronously (insert log row, increment the counter), so streaming never blocks on stats.
+5. Back in the controller, **after the transaction has ended**, `RangeFileResponder` answers `200` or `206 Partial Content` with `Accept-Ranges`, `Content-Type`, and `ETag`/`Last-Modified`; downloads get an RFC 6266 `Content-Disposition`. A long video stream therefore never holds a DB connection.
 
 ### 3.3 Search
 
@@ -112,20 +111,24 @@ Librarian triggers `/api/admin/import`. `ImportService` checks the CSV exists an
 **Security**
 - Stateless JWT. `JwtAuthFilter` reads a token if present and sets the authentication, but never rejects anonymous requests, so public endpoints stay open while staff see `STAFF` items.
 - Roles enforced with method security (`@PreAuthorize`) on write and admin endpoints. Ownership checks live in services.
-- BCrypt for passwords. Simple login throttling (in-memory failed-attempt counter) to slow guessing.
+- BCrypt for passwords; unknown usernames still run one BCrypt check, so timing doesn't reveal which accounts exist. Login throttling: 5 failures within 15 minutes lock a username for 5 minutes (in memory, stale entries removed).
 - Upload hardening: generated file names, sniffed content types, no executables, paths constrained to the storage root.
+- Headers: Spring Security defaults (`nosniff` etc.), with `X-Frame-Options: SAMEORIGIN` so the front-end may show PDFs in an `<iframe>`.
+- Media processing: `ffmpeg`/`ffprobe` run with a 60 s timeout; images over 50 megapixels get no thumbnail (memory).
 
 **Error handling**: one `GlobalExceptionHandler` mapping domain exceptions to the standard `{status, code, message}` body.
 
-**Transactions**: DB transactions only wrap DB work. File operations stay outside them, with explicit compensation.
+**Transactions**: DB transactions only wrap DB work. File operations stay outside them, with explicit compensation. Where a file must change together with a row (replacing a book file), the file clean-up runs in an `afterCompletion` hook: the old file is deleted only after commit, the new one on rollback.
 
-**Async work**: three small executors defined in `AsyncConfig`: `mediaExecutor` (2–4 threads: thumbnails), `statsExecutor` (1–2 threads: download logs and counters) and `importExecutor` (1 thread: bulk import). Events use Spring's in-process `ApplicationEventPublisher`. There is no message broker.
+**Async work**: three small executors defined in `AsyncConfig`: `mediaExecutor` (2–4 threads: thumbnails), `statsExecutor` (1–2 threads: download logs and counters) and `importExecutor` (1 thread: bulk import). Events use Spring's in-process `ApplicationEventPublisher`. There is no message broker. Scheduling (`@EnableScheduling`) runs one job: `TempFileSweeper`, hourly.
 
 **Configuration**: `application.yml` plus `dev` and `prod` profiles. Secrets (`JWT_SECRET`, `ADMIN_PASSWORD`, DB password) come from environment variables via the systemd unit.
 
 **Observability**: logs to a rotating file, Actuator exposing only `/health`, and a custom storage health indicator (drive mounted, writable, free space). The same data feeds `/api/health`. "Mounted" means the storage root contains a `.library-storage` marker file, so an empty mount point on the OS disk is never mistaken for the drive; in prod the app never creates the root or the marker itself. Details: [phase-7-storage-health.md](phase-7-storage-health.md).
 
-**API documentation**: springdoc-openapi generates the OpenAPI spec for the front-end team.
+**API documentation**: springdoc-openapi generates the OpenAPI spec for the front-end team (`/swagger-ui.html`, `/v3/api-docs`; dev only, disabled in prod). `OpenApiConfig` adds the JWT scheme and the shared `ApiError` responses; `OpenApiIntegrationTest` fails the build if the documented endpoints drift from the spec.
+
+**Testing**: unit tests for pure logic (storage, CSV, throttling, health mapping) and `*IntegrationTest` classes that run the whole app against MySQL 8 in Docker via Testcontainers. Without Docker the integration tests are skipped, not failed. Details: [phase-8-hardening.md](phase-8-hardening.md).
 
 **Database migrations**: Flyway runs on startup; Hibernate only validates (`ddl-auto: validate`).
 
@@ -172,5 +175,5 @@ Microservices, message queues, Redis/caching, Elasticsearch, object storage, vid
 
 - **Disk full or drive unplugged**: handled by the free-space guard, health checks, and degraded mode (browsing works, files return 503).
 - **Power loss**: UPS recommended, and Flyway plus InnoDB handle crash recovery, but the drive should be shut down cleanly where possible.
-- **Large uploads over Wi-Fi**: long timeouts, streaming to disk, and temp-file cleanup for aborted uploads (a scheduled sweep of stale temp files).
+- **Large uploads over Wi-Fi**: long timeouts, streaming to disk, and temp-file cleanup for aborted uploads (`TempFileSweeper`: hourly, files older than 24 h).
 - **Data loss**: nightly DB dump plus a second copy of the archive.
