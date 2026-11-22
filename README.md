@@ -51,6 +51,16 @@ The `dev` profile is the default. On startup:
 | `http://localhost:8081/swagger-ui.html` | Swagger UI ("Authorize" takes the token from `POST /api/auth/login`) |
 | `http://localhost:8081/api/health` | Health: `UP`, `DEGRADED` or `DOWN` |
 
+**Sample archive data**
+
+`seed/import/archive/` holds 20 sample archive items (11 images; 5 videos: mp4, webm, and an mkv browsers can't play; 3 PDFs and a docx; a mix of `PUBLIC` and `STAFF`, two without an event date) and an `archive.csv`. They load through the normal bulk import:
+
+```powershell
+Copy-Item -Recurse -Force seed\import\archive data\import\
+```
+
+Then, logged in as `admin`, send `POST /api/admin/import` with `{"target": "ARCHIVE"}` and poll `GET /api/admin/import/{id}` until it says `COMPLETED`. Running it again is safe: items that already exist are counted as `skipped`. Video poster frames and durations need `ffmpeg`/`ffprobe`. To regenerate the files, run `python seed/generate-archive-seed.py` (needs `ffmpeg`).
+
 ---
 
 ## 3. Tests
