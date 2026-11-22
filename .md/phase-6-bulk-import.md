@@ -155,6 +155,8 @@ Example job:
 #### Setup
 Restart the app after pulling this phase (new library in `pom.xml`). In Eclipse run **Maven → Update Project** first, or start with `.\mvnw.cmd spring-boot:run`.
 
+**Ready-made archive data**: `seed/import/archive/` (20 items + `archive.csv`) can be copied to `./data/import/archive/` and imported as-is. See the [README](../README.md#2-getting-started-dev).
+
 **Book test data**: create `./data/import/books/` with:
 - `fisika-x.pdf`, `modul-kimia.pdf`: two PDFs not yet in the library.
 - `copy.pdf`: a copy of a PDF already uploaded (Phase 3).

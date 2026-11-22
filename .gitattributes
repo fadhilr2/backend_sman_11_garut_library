@@ -1,2 +1,6 @@
 /mvnw text eol=lf
 *.cmd text eol=crlf
+
+# Generated seed files must stay byte-for-byte (PDF xref offsets break on CRLF conversion)
+seed/import/** -text
+*.pdf binary
