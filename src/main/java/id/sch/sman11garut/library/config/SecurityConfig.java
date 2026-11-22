@@ -17,6 +17,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 @Configuration
@@ -51,6 +52,20 @@ public class SecurityConfig {
         };
     }
 
+    /**
+     * 403 from URL rules (e.g. /api/admin/** for a TEACHER). These happen in the filter chain,
+     * before any controller, so GlobalExceptionHandler never sees them; same body as its 403.
+     */
+    @Bean
+    public AccessDeniedHandler accessDeniedHandler() {
+        return (request, response, deniedException) -> {
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            ApiError error = new ApiError(403, "FORBIDDEN", "You do not have permission to do this");
+            response.getOutputStream().write(objectMapper.writeValueAsBytes(error));
+        };
+    }
+
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
@@ -59,7 +74,9 @@ public class SecurityConfig {
             // The front-end (same origin via Nginx) may show PDFs from /api/books/{id}/file in an
             // <iframe>; the default DENY would block that. Other sites still can't frame us.
             .headers(headers -> headers.frameOptions(frame -> frame.sameOrigin()))
-            .exceptionHandling(ex -> ex.authenticationEntryPoint(authenticationEntryPoint()))
+            .exceptionHandling(ex -> ex
+                    .authenticationEntryPoint(authenticationEntryPoint())
+                    .accessDeniedHandler(accessDeniedHandler()))
             .authorizeHttpRequests(auth -> auth
                 // Public auth & health endpoints
                 .requestMatchers("/api/auth/login").permitAll()

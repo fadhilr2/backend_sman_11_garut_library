@@ -68,7 +68,7 @@ sequenceDiagram
 |---|---|---|
 | `auth/AuthService.java` | Modified | Dummy BCrypt check for unknown usernames. |
 | `auth/LoginThrottlingService.java` | Modified | 15-minute failure window; stale entries removed. |
-| `config/SecurityConfig.java` | Modified | `frameOptions(sameOrigin())`. |
+| `config/SecurityConfig.java` | Modified | `frameOptions(sameOrigin())`; `accessDeniedHandler` so URL-rule 403s return the `ApiError` body (§7). |
 | `application-prod.yml` | Modified | springdoc api-docs and swagger-ui disabled. |
 
 ### Sweep and robustness
@@ -140,7 +140,8 @@ The first test run downloads the `mysql:8.0` image (~600 MB) once; afterwards My
 | `OpenApiIntegrationTest` | Documented endpoints equal spec §3 exactly; `bearerAuth`; `ApiError` responses; `metadata` part as JSON. |
 | Unit tests | Storage, range responder, temp sweep, throttling window, health mapping, CSV reader and row mapper. |
 
-> **Result:** without Docker: `BUILD SUCCESS`, 43 unit tests passed, 24 integration tests skipped. With Docker: not run yet.
+> **Result:** without Docker: `BUILD SUCCESS`, 43 unit tests passed, 24 integration tests skipped.
+> With Docker (first run): 67 run, 66 passed, 0 skipped; 1 failure in `AuthIntegrationTest` (403 body without `code`, see §7). After the fix, `AuthIntegrationTest` passes (7/7). Full suite not re-run yet.
 
 ### 6.2 Manual (Postman / browser)
 
@@ -202,3 +203,4 @@ Put a file in `./data/storage/temp`, set its modified date more than 24 hours ba
 |---|---|---|
 | `LibraryApplicationTests` had failed since Phase 0. | No Docker on the dev laptop; the test required it. | Skipped without Docker; runs once Docker Desktop is installed (§6.0). |
 | Spec said `fields` for validation errors. | The code has always sent `fieldErrors`. | Spec corrected. |
+| Teacher on `/api/admin/**` got `403` without `"code": "FORBIDDEN"` (found by the first Docker run). | URL-rule 403s happen in the security filter chain, before any controller, so `GlobalExceptionHandler` never saw them; with no `accessDeniedHandler`, Spring's default `/error` body (`timestamp`, `status`, `error`, `path`) was sent. | `SecurityConfig` registers an `accessDeniedHandler` returning the same `ApiError` as `GlobalExceptionHandler`. |
