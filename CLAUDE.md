@@ -10,7 +10,7 @@ The design docs live in `.md/` and are the source of truth. Read `.md/README.md`
 - `backend-spec.md`: the API contract (endpoints, roles, error codes, business rules).
 - `backend-architecture.md`: modules, flows, dependency rules, trade-offs.
 - `backend-phases.md`: the roadmap. `phase-N-*.md`: what each phase built and how to test it.
-- `Router.md` and `Ubuntu Server.md`: step-by-step notes for the deployment hardware (TP-Link router with no WAN, Ubuntu mini PC netplan/DHCP). They are not yet linked from `.md/README.md`.
+- `Router.md` and `Ubuntu Server.md`: step-by-step notes for the deployment hardware (TP-Link router with no WAN, Ubuntu mini PC netplan/DHCP, external drive mount). `Deployment.md`: the go-live runbook (MySQL, secrets env file, systemd unit, Nginx, smoke tests, backups, updates). All three are linked from `.md/README.md`.
 
 When code changes the contract or the design, update the doc that owns that fact (and the phase doc) instead of repeating it in several places.
 

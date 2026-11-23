@@ -199,7 +199,7 @@ spring:
 ```
 - **Storage marker**: the storage root must contain a `.library-storage` file, or the drive counts as unplugged. With `auto-create-root: false` (prod) the app never creates the root or marker; create the marker once after mounting the drive.
 - **First admin**: if no LIBRARIAN exists at startup, one is created from `ADMIN_USERNAME` / `ADMIN_PASSWORD` (dev fallback `admin` / `admin123`).
-- **Nginx** must match the upload limit: `client_max_body_size 2g;` and raised `proxy_read_timeout` / `proxy_send_timeout` (e.g. 600 s).
+- **Nginx** must match the upload limit: `client_max_body_size 2g;`, `proxy_request_buffering off;` (stream uploads instead of buffering them on the SSD) and raised `proxy_read_timeout` / `proxy_send_timeout` (e.g. 600 s).
 - **CORS**: not needed in production; the front-end is served by the same Nginx.
 - **API docs**: `/swagger-ui.html` and `/v3/api-docs` in dev only; the prod profile disables them (`springdoc.api-docs.enabled: false`).
 

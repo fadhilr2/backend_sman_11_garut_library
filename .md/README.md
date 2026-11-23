@@ -23,6 +23,14 @@ Phase docs:
 | 8 | [phase-8-hardening.md](phase-8-hardening.md) |
 | 9 | [phase-9-trash.md](phase-9-trash.md) |
 
+Deployment docs (step-by-step Input/Output notes for the school's hardware):
+
+| Doc | Answers |
+|---|---|
+| [Ubuntu Server.md](Ubuntu%20Server.md) | How was the mini PC set up? Network, packages, external drive mount and marker. |
+| [Router.md](Router.md) | How was the TP-Link router set up? LAN-only Wi-Fi, DHCP reservation, hardening. |
+| [Deployment.md](Deployment.md) | How does the app go live? Database, secrets, systemd, Nginx, tests, backups, updates. |
+
 ---
 
 ## Conventions (all docs)
