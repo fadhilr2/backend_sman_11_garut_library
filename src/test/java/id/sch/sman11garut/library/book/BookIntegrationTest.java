@@ -16,17 +16,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.jayway.jsonpath.JsonPath;
 import id.sch.sman11garut.library.support.IntegrationTestBase;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.Arrays;
 import java.util.List;
-import java.util.stream.Stream;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.request.MockMultipartHttpServletRequestBuilder;
 
 class BookIntegrationTest extends IntegrationTestBase {
 
@@ -156,6 +153,46 @@ class BookIntegrationTest extends IntegrationTestBase {
     }
 
     @Test
+    void aCoverCanBeAddedLaterAndReplaced() throws Exception {
+        String teacher = newTeacher()[1];
+        long id = uploadBook(teacher, "Tanpa Sampul " + unique(), "PUBLIC");
+        mvc.perform(get("/api/books/" + id)).andExpect(jsonPath("$.hasCover").value(false));
+
+        byte[] first = uniquePng(40, 60);
+        mvc.perform(as(putCover(id, "sampul.png", "image/png", first), teacher))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.hasCover").value(true));
+        assertArrayEquals(first, mvc.perform(get("/api/books/" + id + "/cover"))
+                .andExpect(header().string(HttpHeaders.CONTENT_TYPE, "image/png"))
+                .andReturn().getResponse().getContentAsByteArray());
+
+        // Replacing it serves the new image and deletes the old file after the commit.
+        byte[] second = uniquePng(50, 70);
+        mvc.perform(as(putCover(id, "sampul-baru.png", "image/png", second), adminToken()))
+                .andExpect(status().isOk());
+        assertArrayEquals(second, mvc.perform(get("/api/books/" + id + "/cover"))
+                .andReturn().getResponse().getContentAsByteArray());
+        assertFalse(storedFileWithContent(first), "old cover is deleted after the commit");
+
+        // Not an image -> 400; another teacher -> 403. The cover stays as it was.
+        mvc.perform(as(putCover(id, "bukan.png", "image/png", uniquePdf()), teacher))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_FILE_TYPE"));
+        mvc.perform(as(putCover(id, "lain.png", "image/png", uniquePng(30, 30)), newTeacher()[1]))
+                .andExpect(status().isForbidden());
+        assertTrue(storedFileWithContent(second), "current cover is untouched by rejected uploads");
+    }
+
+    private static MockMultipartHttpServletRequestBuilder putCover(long id, String name, String type, byte[] content) {
+        return multipart("/api/books/" + id + "/cover")
+                .file(new MockMultipartFile("cover", name, type, content))
+                .with(request -> {
+                    request.setMethod("PUT");
+                    return request;
+                });
+    }
+
+    @Test
     void softDeleteHidesTheBookAndRestoreBringsItBack() throws Exception {
         String teacher = newTeacher()[1];
         long id = uploadBook(teacher, "Sejarah " + unique(), "PUBLIC");
@@ -166,18 +203,6 @@ class BookIntegrationTest extends IntegrationTestBase {
         mvc.perform(as(post("/api/admin/books/" + id + "/restore"), teacher)).andExpect(status().isForbidden());
         mvc.perform(as(post("/api/admin/books/" + id + "/restore"), adminToken())).andExpect(status().isOk());
         mvc.perform(get("/api/books/" + id)).andExpect(status().isOk());
-    }
-
-    private static boolean storedFileWithContent(byte[] content) throws Exception {
-        try (Stream<Path> files = Files.walk(STORAGE_ROOT.resolve("books"))) {
-            return files.filter(Files::isRegularFile).anyMatch(file -> {
-                try {
-                    return Files.size(file) == content.length && Arrays.equals(Files.readAllBytes(file), content);
-                } catch (Exception ex) {
-                    return false;
-                }
-            });
-        }
     }
 
     @Test

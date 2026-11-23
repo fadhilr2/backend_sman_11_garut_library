@@ -29,7 +29,8 @@ class OpenApiIntegrationTest extends IntegrationTestBase {
             // 3.4 Auth
             "POST /api/auth/login", "GET /api/auth/me", "POST /api/auth/change-password",
             // 3.5 Teacher + Librarian
-            "POST /api/books", "PUT /api/books/{id}", "PUT /api/books/{id}/file", "DELETE /api/books/{id}",
+            "POST /api/books", "PUT /api/books/{id}", "PUT /api/books/{id}/file", "PUT /api/books/{id}/cover",
+            "DELETE /api/books/{id}",
             "GET /api/books/mine",
             "POST /api/archive", "PUT /api/archive/{id}", "DELETE /api/archive/{id}", "GET /api/archive/mine",
             // 3.6 Librarian only

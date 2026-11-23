@@ -146,6 +146,15 @@ public class BookController {
         return ResponseEntity.ok(bookService.replaceBookFile(id, file, principal));
     }
 
+    @Operation(summary = "Set or replace the cover image, JPEG or PNG (owner or librarian)")
+    @PutMapping(value = "/{id}/cover", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<BookDetailDto> replaceCover(
+            @PathVariable Long id,
+            @RequestPart("cover") MultipartFile cover,
+            @AuthenticationPrincipal UserPrincipal principal) {
+        return ResponseEntity.ok(bookService.replaceBookCover(id, cover, principal));
+    }
+
     @Operation(summary = "Soft-delete a book (owner or librarian)")
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteBook(

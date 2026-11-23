@@ -118,11 +118,14 @@ public class ImportRunner {
         if (target == ImportTarget.BOOK) {
             BookRow parsed = ImportRowMapper.toBook(row);
             Path file = resolveFile(folder, parsed.filename());
+            Path cover = parsed.coverFilename() != null ? resolveCover(folder, parsed.coverFilename()) : null;
             validate(parsed.metadata());
             BookMetadataRequest metadata = parsed.metadataWithCategory(
                     categoryService.findOrCreateBookCategoryId(parsed.categoryName()));
-            try (InputStream in = Files.newInputStream(file)) {
-                bookService.createBookFromStream(in, file.getFileName().toString(), metadata);
+            try (InputStream in = Files.newInputStream(file);
+                 InputStream coverIn = cover != null ? Files.newInputStream(cover) : null) {
+                bookService.createBookFromStream(in, file.getFileName().toString(), metadata,
+                        coverIn, cover != null ? cover.getFileName().toString() : null);
             }
         } else {
             ArchiveRow parsed = ImportRowMapper.toArchive(row);
@@ -152,6 +155,15 @@ public class ImportRunner {
             throw new ImportRowException("File not found in the import folder");
         }
         return file;
+    }
+
+    /** Same rules as {@link #resolveFile}, with messages that say the cover is the problem. */
+    static Path resolveCover(Path folder, String coverFilename) {
+        try {
+            return resolveFile(folder, coverFilename);
+        } catch (ImportRowException ex) {
+            throw new ImportRowException("Cover '" + coverFilename + "': " + ex.getMessage());
+        }
     }
 
     private <T> void validate(T metadata) {

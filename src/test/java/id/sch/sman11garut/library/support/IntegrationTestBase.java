@@ -12,8 +12,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.UUID;
 import java.util.function.BooleanSupplier;
+import java.util.stream.Stream;
 import javax.imageio.ImageIO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -192,6 +194,19 @@ public abstract class IntegrationTestBase {
         return mvc.perform(as(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(url), token))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+    }
+
+    /** True if any stored book file or cover has exactly this content. */
+    protected static boolean storedFileWithContent(byte[] content) throws Exception {
+        try (Stream<Path> files = Files.walk(STORAGE_ROOT.resolve("books"))) {
+            return files.filter(Files::isRegularFile).anyMatch(file -> {
+                try {
+                    return Files.size(file) == content.length && Arrays.equals(Files.readAllBytes(file), content);
+                } catch (Exception ex) {
+                    return false;
+                }
+            });
+        }
     }
 
     /** {@link #getBody} for use inside {@link #await} lambdas. */

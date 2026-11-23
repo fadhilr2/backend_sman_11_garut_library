@@ -43,6 +43,14 @@ class ImportRowMapperTest {
         assertThat(book.metadata().gradeLevel()).isEqualTo(GradeLevel.X);
         assertThat(book.metadata().visibility()).isEqualTo(Visibility.STAFF);
         assertThat(book.metadataWithCategory(7).categoryId()).isEqualTo(7);
+        assertThat(book.coverFilename()).isNull();
+    }
+
+    @Test
+    void readsTheOptionalCoverColumn() {
+        BookRow book = ImportRowMapper.toBook(row("filename", "kelas-x/fisika.pdf", "cover", "kelas-x/fisika.png"));
+
+        assertThat(book.coverFilename()).isEqualTo("kelas-x/fisika.png");
     }
 
     @Test
@@ -97,6 +105,21 @@ class ImportRowMapperTest {
                 .hasMessageContaining("inside the import folder");
         assertThatThrownBy(() -> ImportRunner.resolveFile(folder, "missing.pdf"))
                 .isInstanceOf(ImportRowException.class)
+                .hasMessageContaining("not found");
+    }
+
+    @Test
+    void resolveCoverNamesTheCoverInItsErrors() throws Exception {
+        Files.writeString(folder.resolve("ok.png"), "x");
+
+        assertThat(ImportRunner.resolveCover(folder, "ok.png")).isRegularFile();
+        assertThatThrownBy(() -> ImportRunner.resolveCover(folder, "../secret.png"))
+                .isInstanceOf(ImportRowException.class)
+                .hasMessageStartingWith("Cover '../secret.png': ")
+                .hasMessageContaining("inside the import folder");
+        assertThatThrownBy(() -> ImportRunner.resolveCover(folder, "missing.png"))
+                .isInstanceOf(ImportRowException.class)
+                .hasMessageStartingWith("Cover 'missing.png': ")
                 .hasMessageContaining("not found");
     }
 }

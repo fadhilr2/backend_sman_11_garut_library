@@ -18,7 +18,7 @@ import java.util.stream.Collectors;
  * and validation rules stay identical. Category names are returned separately; the
  * runner resolves them to ids. Pure class with no Spring or DB dependencies.
  *
- * <p>Books CSV: {@code filename,title,author,publisher,year,type,category,grade,curriculum,visibility}
+ * <p>Books CSV: {@code filename,title,author,publisher,year,type,category,grade,curriculum,visibility,cover}
  * <br>Archive CSV: {@code filename,title,description,category,eventDate,visibility}
  * <br>Only {@code filename} is required; a blank title falls back to the file name.
  */
@@ -26,7 +26,8 @@ public final class ImportRowMapper {
 
     public static final List<String> REQUIRED_COLUMNS = List.of("filename");
 
-    public record BookRow(String filename, String categoryName, BookMetadataRequest metadata) {
+    /** {@code coverFilename} is the optional {@code cover} column (null when blank). */
+    public record BookRow(String filename, String coverFilename, String categoryName, BookMetadataRequest metadata) {
         public BookMetadataRequest metadataWithCategory(Integer categoryId) {
             BookMetadataRequest m = metadata;
             return new BookMetadataRequest(m.title(), m.author(), m.publisher(), m.publicationYear(), m.description(),
@@ -57,7 +58,7 @@ public final class ImportRowMapper {
                 parseEnum(GradeLevel.class, row.get("grade"), "grade"),
                 row.get("curriculum"),
                 parseEnum(Visibility.class, row.get("visibility"), "visibility"));
-        return new BookRow(filename, row.get("category"), metadata);
+        return new BookRow(filename, row.get("cover"), row.get("category"), metadata);
     }
 
     public static ArchiveRow toArchive(CsvRow row) {

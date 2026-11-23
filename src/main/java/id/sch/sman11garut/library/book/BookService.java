@@ -195,8 +195,31 @@ public class BookService {
      */
     @Transactional
     public BookDetailDto createBookFromStream(InputStream content, String originalFilename, BookMetadataRequest metadata) {
+        return createBookFromStream(content, originalFilename, metadata, null, null);
+    }
+
+    /**
+     * As above, with an optional cover (JPEG/PNG; {@code coverContent} may be null). The book file
+     * is stored and duplicate-checked first, so a duplicate never stores its cover. A rejected
+     * cover deletes the stored book file and fails with a message prefixed "Cover: ".
+     */
+    @Transactional
+    public BookDetailDto createBookFromStream(InputStream content, String originalFilename, BookMetadataRequest metadata,
+                                              InputStream coverContent, String coverFilename) {
         StoredFileInfo storedFile = storeUniqueBookFile(content, originalFilename);
-        return persistNewBook(storedFile, null, metadata, null);
+        StoredFileInfo storedCover = null;
+        if (coverContent != null) {
+            try {
+                storedCover = fileStorageService.storeFile(coverContent, coverFilename, StorageCategory.COVER);
+            } catch (AppException ex) {
+                fileStorageService.deleteStoredFile(storedFile.relativePath());
+                throw new AppException(ex.getStatus(), ex.getCode(), "Cover: " + ex.getMessage());
+            } catch (RuntimeException ex) {
+                fileStorageService.deleteStoredFile(storedFile.relativePath());
+                throw ex;
+            }
+        }
+        return persistNewBook(storedFile, storedCover, metadata, null);
     }
 
     private StoredFileInfo storeUniqueBookFile(InputStream content, String originalFilename) {
@@ -340,6 +363,36 @@ public class BookService {
         return BookDetailDto.from(saved);
     }
 
+    /**
+     * Sets or replaces a book's cover (JPEG/PNG). Same pattern as {@link #replaceBookFile}: the
+     * old cover is deleted only if the transaction commits, the new one if it rolls back.
+     * Covers have no duplicate check: several books may share the same cover image.
+     */
+    @Transactional
+    public BookDetailDto replaceBookCover(Long id, MultipartFile cover, UserPrincipal principal) {
+        Book book = bookRepository.findByIdAndDeletedAtIsNull(id)
+                .orElseThrow(() -> AppException.notFound("Book not found with id: " + id));
+
+        checkOwnership(book, principal);
+
+        if (cover == null || cover.isEmpty()) {
+            throw AppException.badRequest("FILE_REQUIRED", "A cover image (JPEG or PNG) is required");
+        }
+
+        StoredFileInfo newCover;
+        try {
+            newCover = fileStorageService.storeFile(cover.getInputStream(), cover.getOriginalFilename(), StorageCategory.COVER);
+        } catch (IOException ex) {
+            throw AppException.badRequest("STORAGE_FAILED", "Failed to stream uploaded cover image");
+        }
+
+        cleanUpOnCompletion(book.getCoverPath(), newCover.relativePath());
+        book.setCoverPath(newCover.relativePath());
+
+        Book saved = bookRepository.save(book);
+        return BookDetailDto.from(saved);
+    }
+
     private void cleanUpOnCompletion(String deleteIfCommitted, String deleteIfRolledBack) {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
@@ -350,6 +403,9 @@ public class BookService {
     }
 
     private void deleteQuietly(String relativePath) {
+        if (relativePath == null || relativePath.isBlank()) {
+            return; // e.g. a book that had no cover before
+        }
         try {
             fileStorageService.deleteStoredFile(relativePath);
         } catch (RuntimeException ex) {
