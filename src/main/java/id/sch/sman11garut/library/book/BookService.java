@@ -6,9 +6,12 @@ import id.sch.sman11garut.library.category.CategoryService;
 import id.sch.sman11garut.library.common.AppException;
 import id.sch.sman11garut.library.common.PageResponse;
 import id.sch.sman11garut.library.common.StorageUsage;
+import id.sch.sman11garut.library.common.TrashItemDto;
 import id.sch.sman11garut.library.common.Visibility;
+import id.sch.sman11garut.library.config.TrashProperties;
 import id.sch.sman11garut.library.stats.DownloadEvent;
 import id.sch.sman11garut.library.stats.ItemType;
+import id.sch.sman11garut.library.stats.ItemsPurgedEvent;
 import id.sch.sman11garut.library.storage.FileStorageService;
 import id.sch.sman11garut.library.storage.ServedFile;
 import id.sch.sman11garut.library.storage.StorageCategory;
@@ -19,6 +22,8 @@ import id.sch.sman11garut.library.user.UserRepository;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -49,18 +54,21 @@ public class BookService {
     private final UserRepository userRepository;
     private final FileStorageService fileStorageService;
     private final ApplicationEventPublisher eventPublisher;
+    private final TrashProperties trashProperties;
 
     public BookService(
             BookRepository bookRepository,
             CategoryService categoryService,
             UserRepository userRepository,
             FileStorageService fileStorageService,
-            ApplicationEventPublisher eventPublisher) {
+            ApplicationEventPublisher eventPublisher,
+            TrashProperties trashProperties) {
         this.bookRepository = bookRepository;
         this.categoryService = categoryService;
         this.userRepository = userRepository;
         this.fileStorageService = fileStorageService;
         this.eventPublisher = eventPublisher;
+        this.trashProperties = trashProperties;
     }
 
     @Transactional(readOnly = true)
@@ -368,6 +376,78 @@ public class BookService {
         book.setDeletedAt(null);
         Book restored = bookRepository.save(book);
         return BookDetailDto.from(restored);
+    }
+
+    // ---- trash ----
+
+    /** Soft-deleted books, most recently deleted first. */
+    @Transactional(readOnly = true)
+    public PageResponse<TrashItemDto> listTrash(Pageable pageable) {
+        Pageable byDeletedAt = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(),
+                Sort.by(Sort.Order.desc("deletedAt"), Sort.Order.desc("id")));
+        return PageResponse.from(bookRepository.findByDeletedAtIsNotNull(byDeletedAt).map(this::toTrashItem));
+    }
+
+    /** Permanently deletes one book from the trash. 404 if it isn't in the trash (active, or already purged). */
+    @Transactional
+    public void purgeBook(Long id) {
+        Book book = bookRepository.findByIdAndDeletedAtIsNotNull(id)
+                .orElseThrow(() -> AppException.notFound("Book not found in the trash with id: " + id));
+        purge(List.of(book));
+    }
+
+    /** Permanently deletes every book in the trash; returns how many. */
+    @Transactional
+    public int emptyTrash() {
+        return purge(bookRepository.findByDeletedAtIsNotNull());
+    }
+
+    /** Permanently deletes books trashed before {@code cutoff} (nightly job); returns how many. */
+    @Transactional
+    public int purgeDeletedBefore(Instant cutoff) {
+        return purge(bookRepository.findByDeletedAtBefore(cutoff));
+    }
+
+    /**
+     * Deletes the rows (and, via {@link ItemsPurgedEvent}, their download logs) in this
+     * transaction, then the files once it commits. A rollback leaves both in place. The drive
+     * is checked first, so an unplugged drive fails with 503 instead of orphaning files.
+     */
+    private int purge(List<Book> books) {
+        if (books.isEmpty()) {
+            return 0;
+        }
+        fileStorageService.ensureMounted();
+        List<String> paths = new ArrayList<>();
+        for (Book book : books) {
+            paths.add(book.getStoredPath());
+            if (book.getCoverPath() != null && !book.getCoverPath().isBlank()) {
+                paths.add(book.getCoverPath());
+            }
+        }
+        eventPublisher.publishEvent(new ItemsPurgedEvent(ItemType.BOOK, books.stream().map(Book::getId).toList()));
+        bookRepository.deleteAllInBatch(books);
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                paths.forEach(BookService.this::deleteQuietly);
+            }
+        });
+        log.info("Purged {} book(s) from the trash", books.size());
+        return books.size();
+    }
+
+    private TrashItemDto toTrashItem(Book book) {
+        return new TrashItemDto(
+                book.getId(),
+                book.getTitle(),
+                book.getBookType() != null ? book.getBookType().name() : null,
+                book.getOriginalName(),
+                book.getMimeType(),
+                book.getFileSize(),
+                book.getUploadedBy() != null ? book.getUploadedBy().getFullName() : null,
+                book.getDeletedAt(),
+                trashProperties.purgeAt(book.getDeletedAt()));
     }
 
     @Transactional(readOnly = true)

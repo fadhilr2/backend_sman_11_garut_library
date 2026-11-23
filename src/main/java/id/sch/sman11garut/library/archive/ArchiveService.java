@@ -6,10 +6,13 @@ import id.sch.sman11garut.library.category.ArchiveCategoryRepository;
 import id.sch.sman11garut.library.common.AppException;
 import id.sch.sman11garut.library.common.PageResponse;
 import id.sch.sman11garut.library.common.StorageUsage;
+import id.sch.sman11garut.library.common.TrashItemDto;
 import id.sch.sman11garut.library.common.Visibility;
+import id.sch.sman11garut.library.config.TrashProperties;
 import id.sch.sman11garut.library.media.ArchiveItemCreatedEvent;
 import id.sch.sman11garut.library.stats.DownloadEvent;
 import id.sch.sman11garut.library.stats.ItemType;
+import id.sch.sman11garut.library.stats.ItemsPurgedEvent;
 import id.sch.sman11garut.library.storage.FileStorageService;
 import id.sch.sman11garut.library.storage.ServedFile;
 import id.sch.sman11garut.library.storage.StorageCategory;
@@ -20,7 +23,9 @@ import id.sch.sman11garut.library.user.UserRepository;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,6 +36,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
 @Service
@@ -64,18 +71,21 @@ public class ArchiveService {
     private final UserRepository userRepository;
     private final FileStorageService fileStorageService;
     private final ApplicationEventPublisher eventPublisher;
+    private final TrashProperties trashProperties;
 
     public ArchiveService(
             ArchiveRepository archiveRepository,
             ArchiveCategoryRepository archiveCategoryRepository,
             UserRepository userRepository,
             FileStorageService fileStorageService,
-            ApplicationEventPublisher eventPublisher) {
+            ApplicationEventPublisher eventPublisher,
+            TrashProperties trashProperties) {
         this.archiveRepository = archiveRepository;
         this.archiveCategoryRepository = archiveCategoryRepository;
         this.userRepository = userRepository;
         this.fileStorageService = fileStorageService;
         this.eventPublisher = eventPublisher;
+        this.trashProperties = trashProperties;
     }
 
     @Transactional(readOnly = true)
@@ -298,6 +308,82 @@ public class ArchiveService {
         item.setDeletedAt(null);
         ArchiveItem restored = archiveRepository.save(item);
         return ArchiveDetailDto.from(restored);
+    }
+
+    // ---- trash ----
+
+    /** Soft-deleted archive items, most recently deleted first. */
+    @Transactional(readOnly = true)
+    public PageResponse<TrashItemDto> listTrash(Pageable pageable) {
+        Pageable byDeletedAt = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(),
+                Sort.by(Sort.Order.desc("deletedAt"), Sort.Order.desc("id")));
+        return PageResponse.from(archiveRepository.findByDeletedAtIsNotNull(byDeletedAt).map(this::toTrashItem));
+    }
+
+    /** Permanently deletes one archive item from the trash. 404 if it isn't in the trash. */
+    @Transactional
+    public void purgeArchiveItem(Long id) {
+        ArchiveItem item = archiveRepository.findByIdAndDeletedAtIsNotNull(id)
+                .orElseThrow(() -> AppException.notFound("Archive item not found in the trash with id: " + id));
+        purge(List.of(item));
+    }
+
+    /** Permanently deletes every archive item in the trash; returns how many. */
+    @Transactional
+    public int emptyTrash() {
+        return purge(archiveRepository.findByDeletedAtIsNotNull());
+    }
+
+    /** Permanently deletes archive items trashed before {@code cutoff} (nightly job); returns how many. */
+    @Transactional
+    public int purgeDeletedBefore(Instant cutoff) {
+        return purge(archiveRepository.findByDeletedAtBefore(cutoff));
+    }
+
+    /** Same order as {@code BookService.purge}: drive check, rows and logs in the transaction, files after commit. */
+    private int purge(List<ArchiveItem> items) {
+        if (items.isEmpty()) {
+            return 0;
+        }
+        fileStorageService.ensureMounted();
+        List<String> paths = new ArrayList<>();
+        for (ArchiveItem item : items) {
+            paths.add(item.getStoredPath());
+            if (item.getThumbnailPath() != null && !item.getThumbnailPath().isBlank()) {
+                paths.add(item.getThumbnailPath());
+            }
+        }
+        eventPublisher.publishEvent(new ItemsPurgedEvent(ItemType.ARCHIVE, items.stream().map(ArchiveItem::getId).toList()));
+        archiveRepository.deleteAllInBatch(items);
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                paths.forEach(ArchiveService.this::deleteQuietly);
+            }
+        });
+        log.info("Purged {} archive item(s) from the trash", items.size());
+        return items.size();
+    }
+
+    private void deleteQuietly(String relativePath) {
+        try {
+            fileStorageService.deleteStoredFile(relativePath);
+        } catch (RuntimeException ex) {
+            log.warn("Could not delete stored file {}: {}", relativePath, ex.getMessage());
+        }
+    }
+
+    private TrashItemDto toTrashItem(ArchiveItem item) {
+        return new TrashItemDto(
+                item.getId(),
+                item.getTitle(),
+                item.getMediaType() != null ? item.getMediaType().name() : null,
+                item.getOriginalName(),
+                item.getMimeType(),
+                item.getFileSize(),
+                item.getUploadedBy() != null ? item.getUploadedBy().getFullName() : null,
+                item.getDeletedAt(),
+                trashProperties.purgeAt(item.getDeletedAt()));
     }
 
     @Transactional(readOnly = true)

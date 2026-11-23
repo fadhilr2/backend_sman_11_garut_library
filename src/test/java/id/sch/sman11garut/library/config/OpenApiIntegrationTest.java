@@ -36,6 +36,8 @@ class OpenApiIntegrationTest extends IntegrationTestBase {
             "GET /api/admin/users", "GET /api/admin/users/{id}", "POST /api/admin/users", "PUT /api/admin/users/{id}",
             "POST /api/admin/categories", "PUT /api/admin/categories/{id}", "DELETE /api/admin/categories/{id}",
             "POST /api/admin/books/{id}/restore", "POST /api/admin/archive/{id}/restore",
+            "GET /api/admin/books/trash", "DELETE /api/admin/books/trash/{id}", "DELETE /api/admin/books/trash",
+            "GET /api/admin/archive/trash", "DELETE /api/admin/archive/trash/{id}", "DELETE /api/admin/archive/trash",
             "GET /api/admin/stats",
             "POST /api/admin/import", "GET /api/admin/import/{jobId}", "GET /api/admin/import",
             "GET /api/admin/storage");

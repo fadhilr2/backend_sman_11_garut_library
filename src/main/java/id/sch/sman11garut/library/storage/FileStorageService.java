@@ -131,6 +131,11 @@ public class FileStorageService {
         return resolved;
     }
 
+    /** Throws {@code 503 STORAGE_UNAVAILABLE} when the drive is unplugged. Checked before a permanent delete. */
+    public void ensureMounted() {
+        diskSpaceGuard.ensureMounted();
+    }
+
     public void deleteStoredFile(String relativePath) {
         diskSpaceGuard.ensureMounted();
         Path path = resolveSafePath(relativePath);

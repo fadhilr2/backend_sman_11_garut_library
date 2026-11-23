@@ -1,5 +1,6 @@
 package id.sch.sman11garut.library.book;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
@@ -21,6 +22,16 @@ public interface BookRepository extends JpaRepository<Book, Long>, JpaSpecificat
     Optional<Book> findByIdAndDeletedAtIsNull(Long id);
 
     Page<Book> findByUploadedByIdAndDeletedAtIsNullOrderByCreatedAtDesc(Long userId, Pageable pageable);
+
+    // ---- trash ----
+
+    Page<Book> findByDeletedAtIsNotNull(Pageable pageable);
+
+    Optional<Book> findByIdAndDeletedAtIsNotNull(Long id);
+
+    List<Book> findByDeletedAtIsNotNull();
+
+    List<Book> findByDeletedAtBefore(Instant cutoff);
 
     long countByDeletedAtIsNull();
 

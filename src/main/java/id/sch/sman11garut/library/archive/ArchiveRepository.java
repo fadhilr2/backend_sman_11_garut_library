@@ -1,5 +1,6 @@
 package id.sch.sman11garut.library.archive;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
@@ -19,6 +20,16 @@ public interface ArchiveRepository extends JpaRepository<ArchiveItem, Long>, Jpa
     Optional<ArchiveItem> findByIdAndDeletedAtIsNull(Long id);
 
     Page<ArchiveItem> findByUploadedByIdAndDeletedAtIsNullOrderByCreatedAtDesc(Long userId, Pageable pageable);
+
+    // ---- trash ----
+
+    Page<ArchiveItem> findByDeletedAtIsNotNull(Pageable pageable);
+
+    Optional<ArchiveItem> findByIdAndDeletedAtIsNotNull(Long id);
+
+    List<ArchiveItem> findByDeletedAtIsNotNull();
+
+    List<ArchiveItem> findByDeletedAtBefore(Instant cutoff);
 
     long countByDeletedAtIsNull();
 

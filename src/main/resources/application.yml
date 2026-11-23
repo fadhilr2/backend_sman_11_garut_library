@@ -25,6 +25,10 @@ app:
     expiry-hours: 8
   storage:
     min-free-space: 5GB
+  trash:
+    auto-purge: true          # nightly job permanently deletes items trashed longer than retention
+    retention: 30d
+    purge-cron: "0 30 2 * * *" # 02:30 every night
 
 # Actuator Base Settings
 management:
