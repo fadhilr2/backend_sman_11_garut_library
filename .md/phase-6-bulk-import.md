@@ -10,6 +10,7 @@ Lets a librarian load an existing collection (folders of PDFs, photos, videos) i
 - **One job at a time** on a single-thread executor.
 - **Per-row report**: duplicates are `skipped`, bad rows are `failed` with a readable line; a bad row never stops the job.
 - **Live progress**: `GET /api/admin/import/{jobId}`.
+- **Covers** (added 2026-11-23, after Phase 9): an optional `cover` column attaches a jpg/png during the import, and `PUT /api/books/{id}/cover` sets or replaces the cover of a book that is already in the library.
 
 **Done when:** a folder of files plus a CSV imports correctly, duplicates are skipped, and bad rows are reported without stopping the job.
 
@@ -24,6 +25,9 @@ Lets a librarian load an existing collection (folders of PDFs, photos, videos) i
 - **No transaction around the loop.** Each row commits on its own, so one failure never rolls back the others.
 - **A job can never stay RUNNING forever.** Any job-level failure (including Java `Error`s such as a missing library) marks it `FAILED` with the reason. Jobs left `RUNNING` by a restart are marked `FAILED` at startup.
 - **Duplicate check includes soft-deleted items.** The DB unique key on `checksum_sha256` covers trashed rows, so the check must too (applies to normal uploads as well).
+- **The book file is checked before its cover.** A duplicate is `skipped` without storing its cover. Re-importing therefore never adds a cover to a book that is already in, which is why `PUT /books/{id}/cover` exists. The 122 SIBI books imported on 2026-11-23 before the `cover` column existed got their covers once through this endpoint, using a throwaway script that was not kept.
+- **A bad cover fails the whole row.** A missing or non-image cover reports `Cover ...` and stores nothing (the stored book file is deleted again). This is better than a book silently imported without its cover; fix the cell and re-run.
+- **Covers have no duplicate check.** Several books may share one cover image, unlike book files.
 
 ### Folder and CSV convention
 ```
@@ -34,7 +38,7 @@ Lets a librarian load an existing collection (folders of PDFs, photos, videos) i
 
 | Target | Columns (only `filename` is required) |
 |---|---|
-| BOOK | `filename,title,author,publisher,year,type,category,grade,curriculum,visibility` |
+| BOOK | `filename,title,author,publisher,year,type,category,grade,curriculum,visibility,cover` |
 | ARCHIVE | `filename,title,description,category,eventDate,visibility` |
 
 - Header row required; column names case-insensitive, any order.
@@ -43,6 +47,7 @@ Lets a librarian load an existing collection (folders of PDFs, photos, videos) i
 - Enum values are case-insensitive; spaces/dashes become `_` (`teaching module` = `TEACHING_MODULE`). Defaults as in the [spec](backend-spec.md#51-visibility-and-defaults).
 - `year` = 4 digits; `eventDate` = `YYYY-MM-DD`.
 - `filename` may include a subfolder (`kelas-x/fisika.pdf`) but must stay inside the target folder (`..` and absolute paths are rejected).
+- `cover` (books only, optional): a jpg/png in the batch, same path rules as `filename` (`kelas-x/fisika.png`).
 
 ---
 
@@ -103,6 +108,15 @@ sequenceDiagram
 | `category/CategoryService.java` | Modified | `findOrCreateBookCategoryId`, `findOrCreateArchiveCategoryId`. |
 | `media/MediaProcessor.java` | Modified | `@TransactionalEventListener(AFTER_COMMIT)` + `REQUIRES_NEW` (thumbnail race fix, see [Phase 4](phase-4-archive.md#7-issues-and-fixes)). |
 
+### Covers (added 2026-11-23)
+| File | Change | Notes |
+|---|---|---|
+| `importer/ImportRowMapper.java` | Modified | `BookRow.coverFilename` from the optional `cover` column. |
+| `importer/ImportRunner.java` | Modified | `resolveCover` (same rules as `resolveFile`, messages prefixed `Cover '<name>':`); passes the cover stream to `BookService`. |
+| `book/BookService.java` | Modified | `createBookFromStream(..., coverContent, coverFilename)`: book file → duplicate check → cover → save; a rejected cover deletes the stored book file. `replaceBookCover`: same commit/rollback cleanup as `replaceBookFile`. `deleteQuietly` ignores a null path (no previous cover). |
+| `book/BookController.java` | Modified | `PUT /api/books/{id}/cover` (multipart `cover`). |
+| `seed/sibi-fetch.py` | New | Downloads SIBI covers into the batch and fills `cover` ([Book Sources.md](Book%20Sources.md)). |
+
 ---
 
 ## 5. API
@@ -112,6 +126,7 @@ sequenceDiagram
 | POST | `/api/admin/import` | Librarian | Body `{"target":"BOOK"}` or `{"target":"ARCHIVE"}` → `202 Accepted` + job, `Location` header |
 | GET | `/api/admin/import/{jobId}` | Librarian | `200` job progress and errors |
 | GET | `/api/admin/import` | Librarian | `200` 20 most recent jobs |
+| PUT | `/api/books/{id}/cover` | Owner or librarian | Multipart `cover` (jpg/png) → `200` book with `hasCover: true`. `400 FILE_REQUIRED` / `INVALID_FILE_TYPE`, `403`, `404`. Added 2026-11-23. |
 
 Errors: `400 IMPORT_CSV_NOT_FOUND`, `400 IMPORT_DIR_NOT_CONFIGURED`, `409 IMPORT_ALREADY_RUNNING`, `503 IMPORT_QUEUE_FULL`, `404 NOT_FOUND`, `401`/`403`.
 
@@ -146,7 +161,9 @@ Example job:
 | Test | Covers |
 |---|---|
 | `ImportCsvReaderTest` | Comma and semicolon files, BOM, quoted commas, blank/delimiter-only lines, short rows, missing header column, empty file. |
-| `ImportRowMapperTest` | Case-insensitive enums, defaults for blank cells, bad year/date/grade messages, missing filename, path traversal (`../`). |
+| `ImportRowMapperTest` | Case-insensitive enums, defaults for blank cells, bad year/date/grade messages, missing filename, path traversal (`../`), the `cover` column and `Cover '...'` messages from `resolveCover`. |
+| `ImportIntegrationTest` | Needs Docker. A full book import (succeeded/skipped/failed, auto-created category); covers: attached and served, missing cover and non-image cover fail the row, and a rejected cover leaves no stored book file. |
+| `BookIntegrationTest.aCoverCanBeAddedLaterAndReplaced` | Needs Docker. `PUT /books/{id}/cover` adds a cover, a replace deletes the old file, a non-image is `400 INVALID_FILE_TYPE`, another teacher gets `403`. |
 
 ### 6.2 Manual (Postman)
 

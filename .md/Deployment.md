@@ -174,9 +174,10 @@ Outputs marked **(expected)** haven't been run yet. Replace them with what you s
 
     ```
     sudo systemctl stop library
-    sudo mysqldump --single-transaction library | gzip > /mnt/library/backups/pre-update-$(date +%F).sql.gz
+    sudo sh -c 'mysqldump --single-transaction library | gzip > /mnt/library/backups/pre-update-$(date +%F).sql.gz'
     sudo install -o root -g library -m 640 /tmp/library.jar /opt/library/library.jar
     sudo systemctl start library
     ```
 
-- **Output (expected):** `journalctl -u library` shows `Started LibraryApplication`, and `/api/health` returns `UP`.
+- **Note:** the backup runs inside `sudo sh -c '...'` because `/mnt/library/backups` belongs to root. With a plain `sudo mysqldump ... > file`, only `mysqldump` runs as root. Your own shell opens the file and fails with `Permission denied` (and `mysqldump: Got errno 11 on write`).
+- **Output (expected):** `ls -lh /mnt/library/backups` shows today's `pre-update-<date>.sql.gz` (not 0 bytes). `journalctl -u library` shows `Started LibraryApplication`, and `/api/health` returns `UP`.

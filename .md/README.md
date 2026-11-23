@@ -30,6 +30,8 @@ Deployment docs (step-by-step Input/Output notes for the school's hardware):
 | [Ubuntu Server.md](Ubuntu%20Server.md) | How was the mini PC set up? Network, packages, external drive mount and marker. |
 | [Router.md](Router.md) | How was the TP-Link router set up? LAN-only Wi-Fi, DHCP reservation, hardening. |
 | [Deployment.md](Deployment.md) | How does the app go live? Database, secrets, systemd, Nginx, tests, backups, updates. |
+| [Content Loading.md](Content%20Loading.md) | How do books get onto the drive? LAN copy into the import folder, bulk import, cleanup. |
+| [Book Sources.md](Book%20Sources.md) | Where do books come from? Legal free sources, and `seed/sibi-fetch.py` for SIBI textbooks. |
 
 ---
 

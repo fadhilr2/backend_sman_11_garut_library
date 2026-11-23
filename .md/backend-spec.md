@@ -72,6 +72,7 @@
 | POST | `/books` | `multipart/form-data`: `file`, optional `cover`, `metadata` (JSON). 409 on duplicate content. | 3 |
 | PUT | `/books/{id}` | Update metadata (own, or any for librarian). | 3 |
 | PUT | `/books/{id}/file` | Replace the file. | 3 |
+| PUT | `/books/{id}/cover` | `multipart/form-data`: `cover` (jpg/png). Set or replace the cover (own, or any for librarian); the old cover file is deleted after commit. | 6 |
 | DELETE | `/books/{id}` | Soft delete. | 3 |
 | GET | `/books/mine` | Uploads by the current user. | 3 |
 | POST | `/archive` | `multipart/form-data`: `file`, `metadata` (JSON: `title`, `description`, `categoryId`, `eventDate`, `visibility`). `mediaType` is detected from the file. | 4 |
@@ -160,12 +161,13 @@ The generated OpenAPI document (dev: `/swagger-ui.html`, `/v3/api-docs`) lists e
 
 ### 5.5 Bulk import
 - The librarian copies files plus a CSV into the import folder, then calls `POST /admin/import`:
-  - `{import-dir}/books/books.csv` with `filename,title,author,publisher,year,type,category,grade,curriculum,visibility`
+  - `{import-dir}/books/books.csv` with `filename,title,author,publisher,year,type,category,grade,curriculum,visibility,cover`
   - `{import-dir}/archive/archive.csv` with `filename,title,description,category,eventDate,visibility`
 - Only `filename` is required; blank cells use the defaults in §5.1; a blank title becomes the file name.
 - UTF-8 (BOM allowed), `,` or `;` delimiter, case-insensitive headers and enum values. `year` = 4 digits, `eventDate` = `YYYY-MM-DD`.
 - Rows go through the normal upload rules. Duplicates are counted as `skipped`; bad rows as `failed` with a message. One job runs at a time.
 - Unknown category names are **created automatically**. Source files are left in place, so re-running is safe.
+- `cover` (books, optional): a jpg/png file in the batch folder, same path rules as `filename`. The book file is checked first, so a duplicate is `skipped` without storing its cover. A missing or invalid cover fails the row (message starts with `Cover`), and nothing is stored. Books imported without a cover get one later with `PUT /books/{id}/cover`.
 
 ### 5.6 Soft delete
 - Deleting sets `deleted_at`; deleted items return 404 and are excluded from lists. They stay in the **trash**, where librarians can restore them. `POST …/restore` on an item that isn't deleted returns `200` and changes nothing.
