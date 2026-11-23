@@ -85,6 +85,9 @@
 | GET/POST/PUT | `/admin/users[/{id}]` | Create teachers, reset password, deactivate. | 1 |
 | POST/PUT/DELETE | `/admin/categories[/{id}]` | Category CRUD (`type`, `name`, `parentId`). Delete is blocked while the category is in use. | 3 |
 | POST | `/admin/books/{id}/restore`, `/admin/archive/{id}/restore` | Undo soft delete. | 3, 4 |
+| GET | `/admin/books/trash`, `/admin/archive/trash` | Trash list, most recently deleted first, paged (`page`, `size`, default 20). Items: `{id, title, kind, originalName, mimeType, fileSize, uploadedByName, deletedAt, purgeAt}`. `kind` is the book type or archive media type; `uploadedByName` is `null` for bulk imports; `purgeAt` is `null` when automatic purging is off. See §5.6. | 9 |
+| DELETE | `/admin/books/trash/{id}`, `/admin/archive/trash/{id}` | Permanently delete one item in the trash (row, file, cover or thumbnail, download logs). `204`; `404` if the item isn't in the trash. | 9 |
+| DELETE | `/admin/books/trash`, `/admin/archive/trash` | Empty that trash. `200 {"purged": n}`. | 9 |
 | GET | `/admin/stats` | Totals, downloads today/this week, 7-day trend, top books, counts by type/media type. | 5 |
 | POST | `/admin/import` | Body `{"target": "BOOK"\|"ARCHIVE"}`. Starts a bulk import from the server folder (see §5.5). `202 Accepted` + job. | 6 |
 | GET | `/admin/import/{jobId}` | Job progress and per-row error report. | 6 |
@@ -125,7 +128,7 @@ The generated OpenAPI document (dev: `/swagger-ui.html`, `/v3/api-docs`) lists e
 | 409 | `IMPORT_ALREADY_RUNNING` | Another import job is RUNNING. |
 | 500 | `STORAGE_WRITE_FAILED`, `INTERNAL_ERROR` | Server-side failure. |
 | 503 | `STORAGE_FULL` | Free disk space under `app.storage.min-free-space`. |
-| 503 | `STORAGE_UNAVAILABLE` | Storage drive not mounted (no `.library-storage` marker) or not writable. File, upload and import requests only; browsing keeps working. |
+| 503 | `STORAGE_UNAVAILABLE` | Storage drive not mounted (no `.library-storage` marker) or not writable. File, upload, import and permanent-delete requests only; browsing keeps working. |
 | 503 | `IMPORT_QUEUE_FULL` | Import executor queue full. |
 
 ---
@@ -165,8 +168,10 @@ The generated OpenAPI document (dev: `/swagger-ui.html`, `/v3/api-docs`) lists e
 - Unknown category names are **created automatically**. Source files are left in place, so re-running is safe.
 
 ### 5.6 Soft delete
-- Deleting sets `deleted_at`; deleted items return 404 and are excluded from lists. Librarians can restore them.
-- *(Optional, not built)* a nightly cleanup removing files of items deleted over 30 days ago.
+- Deleting sets `deleted_at`; deleted items return 404 and are excluded from lists. They stay in the **trash**, where librarians can restore them. `POST …/restore` on an item that isn't deleted returns `200` and changes nothing.
+- **Permanent delete** (purge) removes the row, its files (book file and cover, or archive file and thumbnail) and its download logs. It can't be undone. Until an item is purged, its checksum still blocks re-uploading the same file (§5.2).
+- Librarians purge one item or empty a whole trash (books and archive separately). While the drive is unplugged, purging returns `503 STORAGE_UNAVAILABLE` and deletes nothing.
+- **Automatic purge**: a nightly job (02:30) purges items deleted more than `app.trash.retention` ago (default 30 days), so `purgeAt = deletedAt + retention`. With `app.trash.auto-purge: false` nothing is purged automatically and `purgeAt` is `null`. The job skips a run while the drive is unplugged.
 
 ---
 
@@ -180,6 +185,10 @@ app:
     min-free-space: 5GB
     auto-create-root: false         # dev: true (creates root + marker)
     temp-max-age: 24h               # hourly sweep deletes older files in <root>/temp
+  trash:
+    auto-purge: true                # nightly purge of old trash (§5.6)
+    retention: 30d
+    purge-cron: "0 30 2 * * *"
   jwt:
     secret: ${JWT_SECRET}
     expiry-hours: 8

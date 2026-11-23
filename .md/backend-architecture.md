@@ -38,8 +38,8 @@ Nothing leaves the LAN. MySQL listens on localhost only. Spring Boot listens on 
 Package root: `id.sch.sman11garut.library`
 
 ```
-config/      SecurityConfig, JwtAuthFilter, JwtProperties, StorageProperties, AsyncConfig, OpenApiConfig
-common/      ApiError, AppException, GlobalExceptionHandler, PageResponse, Visibility
+config/      SecurityConfig, JwtAuthFilter, JwtProperties, StorageProperties, TrashProperties, AsyncConfig, OpenApiConfig
+common/      ApiError, AppException, GlobalExceptionHandler, PageResponse, Visibility, TrashItemDto, PurgeResultDto
 auth/        AuthController, AuthService, JwtService, LoginThrottlingService, CustomUserDetailsService
 user/        User, UserRepository, UserService, UserAdminController, AdminUserSeeder
 category/    BookCategory, ArchiveCategory, repositories, CategoryService, controllers
@@ -48,9 +48,10 @@ storage/     FileStorageService, RangeFileResponder, DiskSpaceGuard, FileTypeDet
 book/        Book, BookRepository, BookSpecifications, BookService, BookController, BookAdminController
 archive/     ArchiveItem, ArchiveRepository, ArchiveSpecifications, ArchiveService, controllers
 media/       MediaProcessor (thumbnails, ffprobe), listens for ArchiveItemCreatedEvent
-stats/       DownloadLog, DownloadEventListener, StatsService, AdminStatsController
+stats/       DownloadLog, DownloadEventListener, ItemsPurgedListener, StatsService, AdminStatsController
 importer/    ImportJob, ImportService, ImportRunner, ImportCsvReader, ImportRowMapper, ImportController
 health/      HealthService, HealthController, StorageHealthIndicator, StorageUsageService, AdminStorageController
+trash/       TrashPurgeJob (nightly purge; the trash endpoints live in BookAdminController / ArchiveAdminController)
 ```
 
 ### Layering inside each feature
@@ -70,6 +71,7 @@ book, archive -> storage, category, user (via services)
 importer       -> book service, archive service, category service (never their repositories)
 media, stats   -> react to events only; nothing calls them directly
 health         -> storage, book service, archive service (read-only reporting)
+trash          -> book service, archive service (scheduled purge only)
 storage        -> depends on nothing in the app (pure infrastructure)
 ```
 
@@ -106,6 +108,17 @@ Query parameters become a JPA `Specification` (category, grade, type, visibility
 
 Librarian triggers `/api/admin/import`. `ImportService` checks the CSV exists and no job is running, commits an `import_jobs` row, and hands it to `ImportRunner` on the **single-thread `import` executor**. The runner reads `{import-dir}/{books|archive}/*.csv` and, per row, calls `BookService.createBookFromStream` / `ArchiveService.createArchiveItemFromStream`: the same create path as a normal upload, so validation, checksums, compensation and events behave identically. There is no transaction around the loop; each row commits on its own. Duplicates count as skipped, other errors are recorded per row, and neither stops the job. Any job-level failure marks the job `FAILED`; jobs left `RUNNING` by a restart are marked `FAILED` at startup. Details: [phase-6-bulk-import.md](phase-6-bulk-import.md).
 
+### 3.5 Trash and permanent delete
+
+A soft delete only sets `deleted_at`. Purging (one item, a whole trash, or the nightly `TrashPurgeJob` for items older than the retention) runs in `BookService` / `ArchiveService`, inside one transaction:
+
+1. `FileStorageService.ensureMounted()`: an unplugged drive fails with 503 **before** anything changes, so rows are never deleted while their files can't be.
+2. Publish `ItemsPurgedEvent`. `stats` handles it **synchronously** in the same transaction and deletes the items' `download_logs` (that table has no foreign key to the item tables).
+3. Delete the rows.
+4. An `afterCommit` hook deletes the files (book file and cover, or archive file and thumbnail). A rollback keeps rows, logs and files.
+
+This is the reverse of upload ordering on purpose: on upload the file is written first, so a failure can't leave a row pointing at a missing file. On purge the row goes first, so the worst case (a crash between commit and file delete) is an orphan file, never a row pointing at a missing file. The nightly job purges books and archive in separate transactions. Details: [phase-9-trash.md](phase-9-trash.md).
+
 ## 4. Cross-cutting concerns
 
 **Security**
@@ -120,7 +133,7 @@ Librarian triggers `/api/admin/import`. `ImportService` checks the CSV exists an
 
 **Transactions**: DB transactions only wrap DB work. File operations stay outside them, with explicit compensation. Where a file must change together with a row (replacing a book file), the file clean-up runs in an `afterCompletion` hook: the old file is deleted only after commit, the new one on rollback.
 
-**Async work**: three small executors defined in `AsyncConfig`: `mediaExecutor` (2–4 threads: thumbnails), `statsExecutor` (1–2 threads: download logs and counters) and `importExecutor` (1 thread: bulk import). Events use Spring's in-process `ApplicationEventPublisher`. There is no message broker. Scheduling (`@EnableScheduling`) runs one job: `TempFileSweeper`, hourly.
+**Async work**: three small executors defined in `AsyncConfig`: `mediaExecutor` (2–4 threads: thumbnails), `statsExecutor` (1–2 threads: download logs and counters) and `importExecutor` (1 thread: bulk import). Events use Spring's in-process `ApplicationEventPublisher`. There is no message broker. Scheduling (`@EnableScheduling`) runs two jobs on Spring's scheduler thread: `TempFileSweeper` (hourly) and `TrashPurgeJob` (nightly, `app.trash.purge-cron`).
 
 **Configuration**: `application.yml` plus `dev` and `prod` profiles. Secrets (`JWT_SECRET`, `ADMIN_PASSWORD`, DB password) come from environment variables via the systemd unit.
 
@@ -166,6 +179,7 @@ Librarian triggers `/api/admin/import`. `ImportService` checks the CSV exists an
 | Stateless JWT | Front-end is a separate client, no session storage. | Tokens can't be revoked before expiry (8 h, acceptable here). |
 | Plain MySQL search | Enough for this data size. | Weaker relevance ranking than a search engine. |
 | No transcoding | Avoids heavy CPU work on a mini PC. | Unsupported video formats are download-only. |
+| Trash with a 30-day automatic purge | Deleted items stay restorable for a month, and disk space comes back without a librarian having to remember. | A file can't be re-uploaded until its trashed copy is purged (the checksum still matches). |
 
 ## 8. Out of scope (deliberately)
 

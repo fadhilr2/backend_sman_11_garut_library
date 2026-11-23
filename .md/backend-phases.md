@@ -15,6 +15,7 @@
 | 6 | Bulk import | Done | [phase-6-bulk-import.md](phase-6-bulk-import.md) |
 | 7 | Storage usage and health | Done | [phase-7-storage-health.md](phase-7-storage-health.md) |
 | 8 | Hardening and handover prep | Done | [phase-8-hardening.md](phase-8-hardening.md) |
+| 9 | Trash | Done | [phase-9-trash.md](phase-9-trash.md) |
 
 ---
 
@@ -56,6 +57,10 @@
 - **Scope**: OpenAPI docs cleaned up for the front-end team, integration tests with Testcontainers, a security review (upload rules, throttling, JWT config, `Content-Disposition` encoding), and a scheduled sweep that deletes stale temp files.
 - **Done when**: tests pass on a clean checkout and the OpenAPI spec matches the real endpoints.
 - **Note**: the integration tests need Docker Desktop on the developer's machine (Testcontainers starts a throwaway MySQL 8); without it they are skipped. Not needed on the server.
+
+### Phase 9: Trash
+- **Scope**: added for the front-end's Tempat Sampah screen (Stage 5A). Trash lists for books and archive, permanent delete of one item or a whole trash (rows, files and download logs), and a nightly job that purges items deleted over 30 days ago.
+- **Done when**: a librarian can list, restore and purge trashed items, a purged file can be uploaded again, and items older than the retention disappear overnight.
 
 ---
 
