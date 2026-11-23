@@ -1,6 +1,6 @@
 # Phase 9: Trash
 
-> **Status:** Done · **Commit:** _(fill in after commit)_ · **Roadmap:** [Phase 9](backend-phases.md#phase-9-trash) · **Spec:** [§3.6 Librarian only](backend-spec.md#36-librarian-only), [§5.6 Soft delete](backend-spec.md#56-soft-delete)
+> **Status:** Done · **Commit:** `ae2229d` · **Roadmap:** [Phase 9](backend-phases.md#phase-9-trash) · **Spec:** [§3.6 Librarian only](backend-spec.md#36-librarian-only), [§5.6 Soft delete](backend-spec.md#56-soft-delete)
 
 ## 1. Summary
 
